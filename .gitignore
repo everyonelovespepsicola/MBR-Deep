@@ -1,0 +1,24 @@
+# Python
+.env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C/C++ Build Artifacts
+*.obj
+*.lib
+*.exp
+*.dll
+*.exe
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# App Exports & Logs
+export/
+output_tree.txt
+
+# vcpkg (Package Manager)
+vcpkg/
