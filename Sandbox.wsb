@@ -1,0 +1,14 @@
+<Configuration>
+  <VGpu>Enable</VGpu>
+  <Networking>Enable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\projects\MBR-Deep</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\Create_TestFiles.ps1; Start-Process C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\dist\MBRDeep_Setup.exe"</Command>
+  </LogonCommand>
+</Configuration>

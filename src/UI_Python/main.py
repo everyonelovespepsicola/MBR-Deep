@@ -132,13 +132,18 @@ def get_resource_path(relative_path):
     try:
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
+        # When bundled by PyInstaller, the DLL is flattened into the root of _MEIPASS
+        if "fast_search.dll" in relative_path:
+            return os.path.join(base_path, "fast_search.dll")
+        if "icon.ico" in relative_path:
+            return os.path.join(base_path, "icon.ico")
     except Exception:
         # If not running as a PyInstaller app, use the normal current directory
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 # 1. Load your newly created DLL
-dll_path = get_resource_path("fast_search.dll")
+dll_path = get_resource_path(os.path.join("..", "Engine", "fast_search.dll"))
 try:
     # Use CDLL for standard C calling convention (cdecl)
     my_dll = ctypes.CDLL(dll_path)
@@ -395,7 +400,7 @@ root.title("MBR-Deep")
 root.geometry("1050x500")
 
 try:
-    root.iconbitmap(get_resource_path("icon.ico"))
+    root.iconbitmap(get_resource_path(os.path.join("..", "..", "icon.ico")))
 except Exception:
     pass
 

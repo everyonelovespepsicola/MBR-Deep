@@ -1,0 +1,2 @@
+C:\projects\MBR-Deep\dist\payload\Backend\BackendService.pdb
+C:\projects\MBR-Deep\dist\payload\Backend\BackendService.exe

@@ -30,12 +30,12 @@ if (-Not (Test-Path "$EnvDir\Scripts\python.exe")) {
 & ".\$EnvDir\Scripts\python.exe" -c "import sv_ttk; import pypdfium2; import win32gui; from PIL import Image" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing missing dependencies (sv_ttk, pypdfium2, pywin32, pillow)..." -ForegroundColor Cyan
-    & ".\$EnvDir\Scripts\pip.exe" install sv_ttk pypdfium2 pywin32 pillow
+    & ".\$EnvDir\Scripts\python.exe" -m pip install sv_ttk pypdfium2 pywin32 pillow
 }
 
 # 2. Check if the DLL has been built
-if (-Not (Test-Path "fast_search.dll")) {
-    Write-Host "Warning: fast_search.dll not found! Please run build.ps1 first." -ForegroundColor Red
+if (-Not (Test-Path "..\Engine\fast_search.dll")) {
+    Write-Host "Warning: ..\Engine\fast_search.dll not found! Please run build.ps1 from the project root first." -ForegroundColor Red
     exit 1
 }
 
@@ -45,7 +45,7 @@ Write-Host "Activating virtual environment..." -ForegroundColor Cyan
 
 # 4. Update the output tree
 Write-Host "Updating output_tree.txt..." -ForegroundColor Cyan
-cmd /c "tree /F /A > output_tree.txt"
+cmd /c "cd ..\.. && update_tree.bat"
 
 # 5. Run the application
-python main.py
+& ".\$EnvDir\Scripts\python.exe" main.py

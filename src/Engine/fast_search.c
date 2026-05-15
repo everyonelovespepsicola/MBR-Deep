@@ -305,13 +305,13 @@ __declspec(dllexport) int FastGrepFile(const char* filePath, const char* searchT
                     current++;
                 }
             } else {
-                char lowerFirst = searchTerm[0];
+                char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
                 char upperFirst = (char)toupper((unsigned char)lowerFirst);
                 while (current <= end) {
                     if (*current == lowerFirst || *current == upperFirst) {
                         int match = 1;
                         for (size_t i = 1; i < termLen; i++) {
-                            if (tolower((unsigned char)current[i]) != (unsigned char)searchTerm[i]) {
+                            if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
                                 match = 0;
                                 break;
                             }
@@ -373,13 +373,13 @@ __declspec(dllexport) int FastGrepArchive(const char* archivePath, const char* s
                         current++;
                     }
                 } else {
-                    char lowerFirst = searchTerm[0];
+                char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
                     char upperFirst = (char)toupper((unsigned char)lowerFirst);
                     while (current <= end) {
                         if (*current == lowerFirst || *current == upperFirst) {
                             int match = 1;
                             for (size_t i = 1; i < termLen; i++) {
-                                if (tolower((unsigned char)current[i]) != (unsigned char)searchTerm[i]) {
+                            if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
                                     match = 0;
                                     break;
                                 }

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BackendService/BackendService.csproj" />
+  </Folder>
+  <Folder Name="/src/UI_WPF/">
+    <Project Path="src/UI_WPF/AppDrawerXAML.csproj" />
+  </Folder>
+</Solution>

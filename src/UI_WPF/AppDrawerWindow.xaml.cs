@@ -1,0 +1,965 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+
+namespace AppDrawerXAML
+{
+    public partial class AppDrawerWindow : Window
+    {
+        // --- Windows API for Native Icons ---
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        public struct SHFILEINFO
+        {
+            public IntPtr hIcon;
+            public int iIcon;
+            public uint dwAttributes;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szDisplayName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+            public string szTypeName;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool DestroyIcon(IntPtr hIcon);
+
+        private const uint SHGFI_ICON = 0x000000100;
+        private const uint SHGFI_SMALLICON = 0x000000001;
+        private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
+        private const uint SHGFI_LARGEICON = 0x000000000; // 0x0 implies Large icon
+        private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+
+        // --- Windows API for Global Hotkey ---
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        private const int HOTKEY_ID = 9000;
+        private const uint MOD_ALT = 0x0001; // ALT
+        private const uint VK_SPACE = 0x20;  // SPACE bar
+        private const int WM_HOTKEY = 0x0312;
+        private IntPtr _windowHandle;
+
+        // --- Native C-Engine Keyboard Hook ---
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void ToggleUICallback();
+
+        [DllImport("fast_search.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void InstallSystemHooks(ToggleUICallback callback);
+
+        [DllImport("fast_search.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void UninstallSystemHooks();
+
+        // Pin the delegate so it doesn't get garbage collected
+        private ToggleUICallback? _toggleCallback;
+
+        // Cache for icons to keep memory usage low and the UI snappy
+        private Dictionary<string, ImageSource> _iconCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+
+        // The collection that automatically updates the XAML UI when items are added
+        public ObservableCollection<SearchResult> SearchResults { get; set; }
+
+        // Cache for the Start Menu shortcuts so they appear instantly when clearing the search
+        private List<SearchResult> _defaultAppDrawerCache = new List<SearchResult>();
+
+        private string currentSearchTerm = "";
+        private CancellationTokenSource? _searchCts;
+
+        // --- System Tray Icon ---
+        private System.Windows.Forms.NotifyIcon? _notifyIcon;
+
+        // Flag to determine if we are actually quitting the app
+        private bool _isExplicitExit = false;
+        private DateTime _lastDeactivated;
+        private bool _isAdvSearching = false;
+
+        public AppDrawerWindow()
+        {
+            InitializeComponent();
+            SearchResults = new ObservableCollection<SearchResult>();
+
+            // Set up CollectionViewSource for Grouping
+            var cvs = new CollectionViewSource { Source = SearchResults };
+            cvs.GroupDescriptions.Add(new PropertyGroupDescription("Category"));
+            ResultsList.ItemsSource = cvs.View;
+
+            // Load Start Menu apps in the background instantly
+            _ = LoadDefaultAppDrawerAsync();
+
+            // Size the window to fill the screen but respect the taskbar
+            this.Width = SystemParameters.WorkArea.Width;
+            this.Height = SystemParameters.WorkArea.Height;
+            this.Top = SystemParameters.WorkArea.Top;
+            this.Left = SystemParameters.WorkArea.Left;
+
+            // 1. Setup the System Tray Icon
+            _notifyIcon = new System.Windows.Forms.NotifyIcon();
+
+            try
+            {
+                // Extracts the default Windows executable icon for the tray
+                string? exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                _notifyIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath ?? "");
+            }
+            catch
+            {
+                // Fallback icon if extraction fails (common in .NET Core)
+                _notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+            }
+            _notifyIcon.Text = "MBR-Deep Search (Click to toggle)";
+            _notifyIcon.Visible = true;
+            _notifyIcon.MouseClick += NotifyIcon_MouseClick;
+
+            // Create a context menu for the tray icon so the user can actually quit
+            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+            var exitItem = new System.Windows.Forms.ToolStripMenuItem("Exit MBR-Deep");
+            exitItem.Click += (s, e) =>
+            {
+                _isExplicitExit = true;
+                System.Windows.Application.Current.Shutdown();
+            };
+            contextMenu.Items.Add(exitItem);
+            _notifyIcon.ContextMenuStrip = contextMenu;
+
+            // 2. Hide the window when it loses focus (like a true native overlay)
+            this.Deactivated += (s, e) =>
+            {
+                _lastDeactivated = DateTime.Now;
+                this.Hide();
+            };
+
+            // 3. Focus the search box instantly when the window is shown
+            this.IsVisibleChanged += (s, e) =>
+            {
+                if (this.IsVisible)
+                {
+                    SearchBox.Focus();
+                    SearchBox.SelectAll();
+                }
+            };
+
+            // 4. Hook the Keyboard via our fast unmanaged C-Engine
+            _toggleCallback = () =>
+            {
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    // Prevent immediate re-opening if clicking the Start Button is what caused the window to lose focus and hide
+                    if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200) return;
+
+                    if (this.IsVisible) this.Hide();
+                    else
+                    {
+                        this.Show();
+                        this.Activate();
+                    }
+                }));
+            };
+            InstallSystemHooks(_toggleCallback);
+
+            // Populate Drive RadioButtons
+            var rbAll = new System.Windows.Controls.RadioButton
+            {
+                Content = "All",
+                GroupName = "AdvDriveGroup",
+                IsChecked = true,
+                Foreground = System.Windows.Media.Brushes.White,
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 15, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            AdvDrivePanel.Children.Add(rbAll);
+
+            foreach (var drive in System.IO.DriveInfo.GetDrives())
+            {
+                if (drive.IsReady)
+                {
+                    var rb = new System.Windows.Controls.RadioButton
+                    {
+                        Content = drive.Name.Substring(0, 1),
+                        GroupName = "AdvDriveGroup",
+                        Foreground = System.Windows.Media.Brushes.White,
+                        FontSize = 16,
+                        Margin = new Thickness(0, 0, 15, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    AdvDrivePanel.Children.Add(rb);
+                }
+            }
+        }
+
+        private void NotifyIcon_MouseClick(object? sender, System.Windows.Forms.MouseEventArgs e)
+        {
+            if (e.Button == System.Windows.Forms.MouseButtons.Left)
+            {
+                // Prevent immediate re-opening if clicking the tray icon is what caused the window to lose focus and hide
+                if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200) return;
+
+                if (this.IsVisible) this.Hide();
+                else
+                {
+                    this.Show();
+                    this.Activate(); // Bring window to the front
+                }
+            }
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            _windowHandle = new WindowInteropHelper(this).Handle;
+            HwndSource? source = HwndSource.FromHwnd(_windowHandle);
+            source?.AddHook(HwndHook);
+
+            // Register Alt + Space as a global hotkey
+            RegisterHotKey(_windowHandle, HOTKEY_ID, MOD_ALT, VK_SPACE);
+        }
+
+        private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
+            {
+                if (this.IsVisible)
+                {
+                    this.Hide();
+                }
+                else
+                {
+                    this.Show();
+                    this.Activate(); // Bring window to the front
+                }
+                handled = true;
+            }
+            return IntPtr.Zero;
+        }
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            // If the user tries to close the window (e.g. Alt+F4), just hide it instead
+            // unless they clicked "Exit" from the tray icon menu.
+            if (!_isExplicitExit)
+            {
+                e.Cancel = true;
+                this.Hide();
+            }
+            else
+            {
+                base.OnClosing(e);
+            }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            // Unregister the global hotkey
+            if (_windowHandle != IntPtr.Zero)
+            {
+                UnregisterHotKey(_windowHandle, HOTKEY_ID);
+            }
+
+            // Unhook the C-Engine low-level keyboard and mouse hooks
+            UninstallSystemHooks();
+
+            // Clean up the tray icon so it doesn't linger after closing the app
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+            }
+            base.OnClosed(e);
+        }
+
+        private async Task LoadDefaultAppDrawerAsync()
+        {
+            await Task.Run(() =>
+            {
+                var apps = new List<SearchResult>();
+                var shortcutPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                void AddShortcuts(string directory)
+                {
+                    if (!Directory.Exists(directory)) return;
+                    try
+                    {
+                        foreach (var file in Directory.EnumerateFiles(directory, "*.lnk", SearchOption.AllDirectories))
+                        {
+                            // Filter out uninstaller and help links
+                            if (file.Contains("Uninstall", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (file.Contains("Help", StringComparison.OrdinalIgnoreCase)) continue;
+                            shortcutPaths.Add(file);
+                        }
+                    }
+                    catch { /* Ignore access exceptions if any folders are locked */ }
+                }
+
+                // Grab all standard Windows Start Menu locations
+                AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
+                AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
+
+                foreach (var path in shortcutPaths)
+                {
+                    var icon = GetSpecificFileIcon(path);
+                    var name = Path.GetFileNameWithoutExtension(path);
+                    apps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "Programs" });
+                }
+
+                // Sort alphabetically
+                apps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+                _defaultAppDrawerCache = apps;
+            });
+
+            // Populate the UI if the user hasn't typed anything yet
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (string.IsNullOrWhiteSpace(SearchBox.Text))
+                {
+                    ShowDefaultApps();
+                }
+            });
+        }
+
+        private void ShowDefaultApps()
+        {
+            SearchResults.Clear();
+            foreach (var app in _defaultAppDrawerCache)
+            {
+                SearchResults.Add(app);
+            }
+        }
+
+        private ImageSource? GetIconForExtension(string fileName)
+        {
+            string ext = Path.GetExtension(fileName);
+            if (string.IsNullOrEmpty(ext)) ext = "folder"; // Fallback for unknown extensions
+
+            // Return cached icon if we already generated it for this file type
+            if (_iconCache.TryGetValue(ext, out ImageSource? cachedIcon))
+            {
+                return cachedIcon;
+            }
+
+            SHFILEINFO shinfo = new SHFILEINFO();
+            // Query Windows for the generic icon associated with this extension
+            IntPtr hImg = SHGetFileInfo(ext, FILE_ATTRIBUTE_NORMAL, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
+
+            if (shinfo.hIcon != IntPtr.Zero)
+            {
+                ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                    shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+
+                DestroyIcon(shinfo.hIcon); // Prevent memory leaks!
+                img.Freeze();              // Essential for passing the image across threads!
+
+                _iconCache[ext] = img;
+                return img;
+            }
+
+            return null;
+        }
+
+        private ImageSource? GetSpecificFileIcon(string filePath)
+        {
+            SHFILEINFO shinfo = new SHFILEINFO();
+            // Query Windows for the *exact* embedded icon of this shortcut file
+            IntPtr hImg = SHGetFileInfo(filePath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON);
+
+            if (shinfo.hIcon != IntPtr.Zero)
+            {
+                ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                    shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+
+                DestroyIcon(shinfo.hIcon);
+                img.Freeze();
+                return img;
+            }
+
+            // Fallback for tricky Chrome/Brave/Edge shortcuts or Advertised Shortcuts
+            try
+            {
+                using System.Drawing.Icon? fallbackIcon = System.Drawing.Icon.ExtractAssociatedIcon(filePath);
+                if (fallbackIcon != null)
+                {
+                    ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                        fallbackIcon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    img.Freeze();
+                    return img;
+                }
+            }
+            catch { /* Ignore fallback errors */ }
+
+            return null;
+        }
+
+        private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            currentSearchTerm = SearchBox.Text.ToLower();
+
+            if (string.IsNullOrWhiteSpace(currentSearchTerm))
+            {
+                _searchCts?.Cancel();
+                ShowDefaultApps();
+                return;
+            }
+
+            // 1. Cancel the previous search immediately if the user is still typing
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            _searchCts = new CancellationTokenSource();
+            var token = _searchCts.Token;
+
+            try
+            {
+                // 2. Debounce: Wait 250ms before starting the scan.
+                // If the user types another letter within 250ms, this delay throws a TaskCanceledException.
+                await Task.Delay(250, token);
+
+                SearchResults.Clear();
+
+                // 3. Search the Start Menu cache first and add to the top
+                var matchingApps = _defaultAppDrawerCache
+                    .Where(app => app.DisplayName != null && app.DisplayName.Contains(currentSearchTerm, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var app in matchingApps)
+                {
+                    SearchResults.Add(app);
+                }
+
+                // 4. Query the background service over IPC
+                await Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var pipeClient = new NamedPipeClientStream(".", "MBRDeepSearchPipe", PipeDirection.InOut, PipeOptions.Asynchronous);
+
+                        // Connect with cancellation support
+                        await pipeClient.ConnectAsync(1000, token);
+
+                        using var writer = new StreamWriter(pipeClient, System.Text.Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                        using var reader = new StreamReader(pipeClient, System.Text.Encoding.UTF8, leaveOpen: true);
+
+                        // Send the query to the engine
+                        var request = new SearchRequest { IsAdvanced = false, BasicQuery = currentSearchTerm };
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(request).AsMemory(), token);
+
+                        // Stream the results as they are piped back
+                        string? resultPath;
+                        while ((resultPath = await reader.ReadLineAsync(token)) != null)
+                        {
+                            // Stop processing when the engine tells us the search is done
+                            if (resultPath == "---EOF---") break;
+
+                            // Dispatch back to the main UI thread to update the ObservableCollection
+                            // Awaiting this safely syncs the background loop with the UI render speed
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                            {
+                                if (SearchResults.Count < 100)
+                                {
+                                    // BUGFIX: Extracting shell icons MUST be done on the UI (STA) thread!
+                                    // Calling SHGetFileInfo from an MTA background thread causes a fatal Access Violation (Terminal Crash)
+                                    ImageSource? icon = GetIconForExtension(resultPath);
+
+                                    SearchResults.Add(new SearchResult
+                                    {
+                                        FileName = resultPath,
+                                        DisplayName = Path.GetFileName(resultPath),
+                                        Icon = icon,
+                                        Category = "Files"
+                                    });
+                                }
+                            });
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // The user typed a new character while we were waiting/reading from the pipe
+                    }
+                    catch (Exception ex)
+                    {
+                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            SearchResults.Add(new SearchResult
+                            {
+                                FileName = "",
+                                DisplayName = $"Engine Offline: {ex.Message}",
+                                Category = "System"
+                            });
+                        });
+                    }
+                }, token);
+            }
+            catch (TaskCanceledException)
+            {
+                // The 250ms debounce delay was cancelled by a new keystroke. Ignore safely.
+            }
+        }
+
+        // --- Advanced Search UI ---
+
+        private void BtnAdvanced_Click(object sender, RoutedEventArgs e)
+        {
+            BasicSearchPanel.Visibility = Visibility.Collapsed;
+            AdvancedPanel.Visibility = Visibility.Visible;
+            AdvName1.Focus();
+        }
+
+        private void AdvCloseBtn_Click(object sender, RoutedEventArgs e)
+        {
+            AdvancedPanel.Visibility = Visibility.Collapsed;
+            BasicSearchPanel.Visibility = Visibility.Visible;
+            SearchBox.Focus();
+        }
+
+        private void AdvBrowseBtn_Click(object sender, RoutedEventArgs e)
+        {
+            using var dialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Select Folder to Search",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = false
+            };
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                AdvLocation.Text = dialog.SelectedPath;
+
+                // Optionally set the drive radio button to match the selected folder's drive automatically
+                string driveLetter = Path.GetPathRoot(dialog.SelectedPath)?.Substring(0, 1).ToUpper() ?? "";
+                foreach (var child in AdvDrivePanel.Children)
+                {
+                    if (child is System.Windows.Controls.RadioButton rb && rb.Content.ToString() == driveLetter)
+                    {
+                        rb.IsChecked = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private async void AdvSearchActionBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isAdvSearching)
+            {
+                // Cancel Search
+                _searchCts?.Cancel();
+                _isAdvSearching = false;
+                AdvSearchActionBtn.Content = "Search";
+                AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                return;
+            }
+
+            string selectedFileType = (AdvFileType.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Content?.ToString() ?? "Everything";
+            bool hasName = !string.IsNullOrWhiteSpace(AdvName1.Text) || !string.IsNullOrWhiteSpace(AdvName2.Text);
+            bool hasContent = !string.IsNullOrWhiteSpace(AdvContent1.Text) || !string.IsNullOrWhiteSpace(AdvContent2.Text);
+            bool hasLocation = !string.IsNullOrWhiteSpace(AdvLocation.Text);
+
+            // Prevent streaming the entire hard drive if all filter fields are empty
+            if (!hasName && !hasContent && !hasLocation && selectedFileType == "Everything")
+            {
+                return;
+            }
+
+            // Prevent accidentally grepping the entire hard drive's contents by defaulting to Documents
+            if (hasContent && !hasName && !hasLocation && selectedFileType == "Everything")
+            {
+                selectedFileType = "Document";
+
+                // Update the UI to reflect the change
+                foreach (System.Windows.Controls.ComboBoxItem item in AdvFileType.Items)
+                {
+                    if (item.Content?.ToString() == "Document")
+                    {
+                        AdvFileType.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+
+            // Start Search
+            _isAdvSearching = true;
+            AdvSearchActionBtn.Content = "Cancel";
+            AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#D70000")!;
+
+            SearchResults.Clear();
+
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            _searchCts = new CancellationTokenSource();
+            var token = _searchCts.Token;
+
+            string? selectedDrive = "All";
+            foreach (var child in AdvDrivePanel.Children)
+            {
+                if (child is System.Windows.Controls.RadioButton rb && rb.IsChecked == true)
+                {
+                    selectedDrive = rb.Content.ToString();
+                    break;
+                }
+            }
+
+            var request = new SearchRequest
+            {
+                IsAdvanced = true,
+                AdvName1 = AdvName1.Text,
+                AdvName2 = AdvName2.Text,
+                AdvContent1 = AdvContent1.Text,
+                AdvContent2 = AdvContent2.Text,
+                AdvLocation = AdvLocation.Text,
+                AdvCaseSensitive = AdvCaseSensitive.IsChecked == true,
+                AdvDrive = selectedDrive,
+                AdvFileType = selectedFileType
+            };
+
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var pipeClient = new NamedPipeClientStream(".", "MBRDeepSearchPipe", PipeDirection.InOut, PipeOptions.Asynchronous);
+                        await pipeClient.ConnectAsync(1000, token);
+
+                        using var writer = new StreamWriter(pipeClient, System.Text.Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                        using var reader = new StreamReader(pipeClient, System.Text.Encoding.UTF8, leaveOpen: true);
+
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(request).AsMemory(), token);
+
+                        string? resultPath;
+                        while ((resultPath = await reader.ReadLineAsync(token)) != null)
+                        {
+                            if (resultPath == "---EOF---") break;
+
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                            {
+                                if (SearchResults.Count < 1000)
+                                {
+                                    ImageSource? icon = GetIconForExtension(resultPath);
+
+                                    SearchResults.Add(new SearchResult
+                                    {
+                                        FileName = resultPath,
+                                        DisplayName = Path.GetFileName(resultPath),
+                                        Icon = icon,
+                                        Category = "Advanced Results"
+                                    });
+                                }
+                            });
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            SearchResults.Add(new SearchResult { FileName = "", DisplayName = $"Engine Offline: {ex.Message}", Category = "System" });
+                        });
+                    }
+                }, token);
+            }
+            finally
+            {
+                if (_isAdvSearching)
+                {
+                    _isAdvSearching = false;
+                    AdvSearchActionBtn.Content = "Search";
+                    AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                }
+            }
+        }
+
+        private void AdvancedField_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Enter)
+            {
+                AdvSearchActionBtn_Click(sender, new RoutedEventArgs());
+                e.Handled = true;
+            }
+        }
+
+        private void SearchBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Down && SearchResults.Count > 0)
+            {
+                ResultsList.Focus();
+                ResultsList.SelectedIndex = 0;
+                e.Handled = true;
+            }
+            else if (e.Key == System.Windows.Input.Key.Enter && SearchResults.Count > 0)
+            {
+                if (ResultsList.SelectedIndex == -1)
+                    ResultsList.SelectedIndex = 0;
+
+                OpenSelectedResult();
+                e.Handled = true;
+            }
+        }
+
+        private void ResultsList_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Enter)
+            {
+                OpenSelectedResult();
+                e.Handled = true;
+            }
+            else if (e.Key == System.Windows.Input.Key.Up && ResultsList.SelectedIndex == 0)
+            {
+                SearchBox.Focus();
+                e.Handled = true;
+            }
+        }
+
+        private void ClearText_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn && btn.TemplatedParent is System.Windows.Controls.TextBox tb)
+            {
+                tb.Clear();
+                tb.Focus();
+            }
+        }
+
+        private void ListBoxItem_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (sender is System.Windows.Controls.ListBoxItem item && item.DataContext is SearchResult result)
+            {
+                OpenResult(result);
+            }
+        }
+
+        private void OpenSelectedResult()
+        {
+            if (ResultsList.SelectedItem is SearchResult selectedResult)
+            {
+                OpenResult(selectedResult);
+            }
+        }
+
+        private SearchResult? GetResultFromMenuItem(object sender)
+        {
+            if (sender is System.Windows.Controls.MenuItem menuItem && menuItem.DataContext is SearchResult result)
+            {
+                return result;
+            }
+            return null;
+        }
+
+        private void MenuItem_Open_Click(object sender, RoutedEventArgs e)
+        {
+            OpenResult(GetResultFromMenuItem(sender));
+        }
+
+        private void MenuItem_OpenLocation_Click(object sender, RoutedEventArgs e)
+        {
+            var result = GetResultFromMenuItem(sender);
+            if (result != null && !string.IsNullOrEmpty(result.FileName))
+            {
+                try
+                {
+                    // Opens Windows Explorer and selects the specific file
+                    Process.Start("explorer.exe", $"/select,\"{result.FileName}\"");
+                    this.Hide();
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show($"Could not open location: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void MenuItem_RunAsAdmin_Click(object sender, RoutedEventArgs e)
+        {
+            var result = GetResultFromMenuItem(sender);
+            if (result != null && !string.IsNullOrEmpty(result.FileName))
+            {
+                try
+                {
+                    new Process
+                    {
+                        StartInfo = new ProcessStartInfo(result.FileName)
+                        {
+                            UseShellExecute = true,
+                            Verb = "runas" // Triggers the UAC elevation prompt
+                        }
+                    }.Start();
+                    this.Hide();
+                }
+                catch (Exception)
+                {
+                    // User likely cancelled the UAC prompt, fail silently.
+                }
+            }
+        }
+
+        private void MenuItem_CopyPath_Click(object sender, RoutedEventArgs e)
+        {
+            var result = GetResultFromMenuItem(sender);
+            if (result != null && !string.IsNullOrEmpty(result.FileName))
+            {
+                System.Windows.Clipboard.SetText(result.FileName);
+            }
+        }
+
+        private void OpenResult(SearchResult? result)
+        {
+            if (result != null && !string.IsNullOrEmpty(result.FileName))
+            {
+                try
+                {
+                    // Open the file or folder using the default Windows application
+                    new Process
+                    {
+                        StartInfo = new ProcessStartInfo(result.FileName)
+                        {
+                            UseShellExecute = true
+                        }
+                    }.Start();
+
+                    // Hide the app drawer after opening
+                    this.Hide();
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show($"Could not open file: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        // --- Sidebar Navigation Click Handlers ---
+        private void Sidebar_Computer_Click(object sender, RoutedEventArgs e)
+        {
+            // Use the native shell GUID to instantly open "This PC"
+            try { Process.Start("explorer.exe", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Computer_Manage_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch Computer Management (Requires UAC)
+            try { Process.Start(new ProcessStartInfo("compmgmt.msc") { UseShellExecute = true, Verb = "runas" }); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Computer_Classic_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch classic System Properties (sysdm.cpl)
+            try { Process.Start(new ProcessStartInfo("sysdm.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Computer_Properties_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch System Properties (maps to modern Settings > About on Win 10/11)
+            try { Process.Start(new ProcessStartInfo("control.exe", "system") { UseShellExecute = true }); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch the classic Control Panel
+            try { Process.Start("control.exe"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Network_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "/name Microsoft.NetworkAndSharingCenter"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Mouse_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "main.cpl"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Power_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "powercfg.cpl"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Programs_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "appwiz.cpl"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Sound_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "mmsys.cpl"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_Users_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("control.exe", "/name Microsoft.UserAccounts"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_ControlPanel_GodMode_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Devices_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch the classic Devices and Printers panel
+            try { Process.Start("explorer.exe", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_DefaultApps_Click(object sender, RoutedEventArgs e)
+        {
+            // Launch the classic Default Programs panel
+            try { Process.Start("control.exe", "/name Microsoft.DefaultPrograms"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Performance_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("taskmgr.exe"); this.Hide(); } catch { }
+        }
+
+        private void Sidebar_Power_Logout_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("shutdown.exe", "/l"); } catch { }
+        }
+
+        private void Sidebar_Power_Restart_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("shutdown.exe", "/r /t 0"); } catch { }
+        }
+
+        private void Sidebar_Power_Shutdown_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start("shutdown.exe", "/s /t 0"); } catch { }
+        }
+    }
+
+    // Data model for the XAML Binding
+    public class SearchResult
+    {
+        public string? FileName { get; set; }
+        public string? DisplayName { get; set; }
+        // Changed from string to ImageSource for direct XAML binding
+        public ImageSource? Icon { get; set; }
+        public string Category { get; set; } = "Files";
+    }
+
+    public class SearchRequest
+    {
+        public bool IsAdvanced { get; set; }
+        public string? BasicQuery { get; set; }
+        public string? AdvName1 { get; set; }
+        public string? AdvName2 { get; set; }
+        public string? AdvContent1 { get; set; }
+        public string? AdvContent2 { get; set; }
+        public string? AdvLocation { get; set; }
+        public bool AdvCaseSensitive { get; set; }
+        public string? AdvDrive { get; set; }
+        public string? AdvFileType { get; set; }
+    }
+}

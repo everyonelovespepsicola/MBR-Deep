@@ -42,7 +42,11 @@ $LINK_LIBS = "$VCPKG_LIBS Advapi32.lib Bcrypt.lib User32.lib Crypt32.lib Ws2_32.
 
 Write-Host "Compiling fast_search.c into fast_search.dll..." -ForegroundColor Cyan
 # Run the batch script and the compiler in the same cmd.exe session
-cmd.exe /c "`"$vcvars`" && cl.exe /LD fast_search.c /I`"$LIBARCHIVE_INCLUDE_PATH`" /link $LINK_LIBS"
+# Explicitly delete the object file to ensure a full recompile after C code changes
+Remove-Item "src\Engine\fast_search.obj" -ErrorAction SilentlyContinue
+
+cmd.exe /c "`"$vcvars`" && cl.exe /LD src\Engine\fast_search.c /I`"$LIBARCHIVE_INCLUDE_PATH`" /Fo:src\Engine\fast_search.obj /Fe:src\Engine\fast_search.dll /link $LINK_LIBS"
+Move-Item -Path "fast_search.lib", "fast_search.exp" -Destination "src\Engine\" -Force -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Build successful! fast_search.dll is ready." -ForegroundColor Green
