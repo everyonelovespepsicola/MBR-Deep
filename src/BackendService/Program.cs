@@ -36,8 +36,6 @@ namespace MBRDeep.BackendService
 
     public class SearchEngineWorker : BackgroundService
     {
-        private CancellationTokenSource? _activeScanCts;
-        private readonly object _scanLock = new object();
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Generic.Dictionary<ulong, (ulong parentId, string fileName)>> _globalMftCache = new();
 
         private static readonly System.Collections.Generic.HashSet<string> AudioExts = new(StringComparer.OrdinalIgnoreCase) { ".aac", ".ac3", ".aif", ".aifc", ".aiff", ".au", ".cda", ".dts", ".fla", ".flac", ".it", ".m1a", ".m2a", ".m3u", ".m4a", ".m4b", ".m4p", ".mid", ".midi", ".mka", ".mod", ".mp2", ".mp3", ".mpa", ".ogg", ".ra", ".rmi", ".snd", ".spc", ".umx", ".voc", ".wav", ".wma", ".xm" };
@@ -56,15 +54,15 @@ namespace MBRDeep.BackendService
         public static extern ulong ScanDriveWithCallback(string driveLetter, FileFoundCallback callback);
 
         [DllImport("fast_search.dll", CallingConvention = CallingConvention.Cdecl)]
-        public static extern int FastGrepFile([MarshalAs(UnmanagedType.LPUTF8Str)] string filePath, [MarshalAs(UnmanagedType.LPUTF8Str)] string searchTerm, int caseSensitive);
+        public static extern int FastGrepFile([MarshalAs(UnmanagedType.LPUTF8Str)] string filePath, [MarshalAs(UnmanagedType.LPUTF8Str)] string searchTerm, int caseSensitive, IntPtr isCancelled);
 
         [DllImport("fast_search.dll", CallingConvention = CallingConvention.Cdecl)]
-        public static extern int FastGrepArchive([MarshalAs(UnmanagedType.LPUTF8Str)] string archivePath, [MarshalAs(UnmanagedType.LPUTF8Str)] string searchTerm, int caseSensitive);
+        public static extern int FastGrepArchive([MarshalAs(UnmanagedType.LPUTF8Str)] string archivePath, [MarshalAs(UnmanagedType.LPUTF8Str)] string searchTerm, int caseSensitive, IntPtr isCancelled);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern bool GetNamedPipeClientProcessId(SafePipeHandle Pipe, out uint ClientProcessId);
 
-        private bool SearchPdf(string filepath, string searchStr, bool caseSensitive)
+        private bool SearchPdf(string filepath, string searchStr, bool caseSensitive, CancellationToken token)
         {
             try
             {
@@ -73,6 +71,7 @@ namespace MBRDeep.BackendService
                 {
                     foreach (var page in document.GetPages())
                     {
+                        if (token.IsCancellationRequested) return false;
                         string text = page.Text;
                         if (text.Contains(searchStr, comp))
                         {
@@ -174,13 +173,26 @@ namespace MBRDeep.BackendService
                         {
                             using var clientProcess = Process.GetProcessById((int)clientProcessId);
                             string? exeName = clientProcess.ProcessName;
+                            string? exePath = clientProcess.MainModule?.FileName;
 
-                            // Ensure ONLY our specific WPF app is allowed to connect
-                            // Allow "dotnet" as well, since the build_AppDrawer.ps1 script launches the UI via dotnet run
-                            if (!string.Equals(exeName, "AppDrawerXAML", StringComparison.OrdinalIgnoreCase) && !string.Equals(exeName, "dotnet", StringComparison.OrdinalIgnoreCase))
+                            bool isAuthorized = false;
+                            if (string.Equals(exeName, "dotnet", StringComparison.OrdinalIgnoreCase))
+                            {
+                                isAuthorized = true; // Allow local developer debugging
+                            }
+                            else if (string.Equals(exeName, "AppDrawerXAML", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Prevent malware from renaming itself to AppDrawerXAML.exe by verifying its physical execution path
+                                if (exePath != null && exePath.Contains("MBR-Deep", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    isAuthorized = true;
+                                }
+                            }
+
+                            if (!isAuthorized)
                             {
                                 Console.ForegroundColor = ConsoleColor.DarkRed;
-                                Console.WriteLine($"[SECURITY] Blocked unauthorized connection from {exeName}.exe (PID: {clientProcessId})");
+                                Console.WriteLine($"[SECURITY] Blocked unauthorized connection from {exePath} (PID: {clientProcessId})");
                                 Console.ResetColor();
                                 pipeServer.Dispose();
                                 continue; // Drop connection, loop back, and wait for a legitimate client
@@ -261,16 +273,6 @@ namespace MBRDeep.BackendService
 
                         Console.WriteLine($"[Search Engine] Query received (IsAdvanced: {request.IsAdvanced})");
 
-                        CancellationToken scanToken;
-                        lock (_scanLock)
-                        {
-                            // Cancel the PREVIOUS query's scan so we aren't wasting CPU/Disk IO
-                            _activeScanCts?.Cancel();
-                            // Do NOT dispose immediately, as worker threads might still be evaluating .IsCancellationRequested
-                            _activeScanCts = new CancellationTokenSource();
-                            scanToken = _activeScanCts.Token;
-                        }
-
                         var drives = new List<string>();
                         if (request.IsAdvanced && !string.IsNullOrEmpty(request.AdvDrive) && request.AdvDrive != "All")
                         {
@@ -289,152 +291,179 @@ namespace MBRDeep.BackendService
 
                         if (drives.Count == 0) continue;
 
+                        using var searchCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        CancellationToken scanToken = searchCts.Token;
+
+                        IntPtr cancelFlag = Marshal.AllocHGlobal(1);
+                        Marshal.WriteByte(cancelFlag, 0);
+
                         try
                         {
-                            Parallel.ForEach(drives, new ParallelOptions { MaxDegreeOfParallelism = drives.Count }, d =>
+                            using var reg = scanToken.Register(() => Marshal.WriteByte(cancelFlag, 1));
+
+                            var searchTask = Task.Run(() =>
                             {
-                                if (stoppingToken.IsCancellationRequested || scanToken.IsCancellationRequested || !pipeServer.IsConnected) return;
-
-                                if (_globalMftCache.TryGetValue(d, out var mftTable))
+                                Parallel.ForEach(drives, new ParallelOptions { MaxDegreeOfParallelism = drives.Count }, (d, driveState) =>
                                 {
-                                    var foundFiles = new System.Collections.Generic.List<ulong>();
-                                    StringComparison comp = request.AdvCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                                    if (scanToken.IsCancellationRequested || !pipeServer.IsConnected) { driveState.Stop(); return; }
 
-                                    foreach (var entry in mftTable)
+                                    if (_globalMftCache.TryGetValue(d, out var mftTable))
                                     {
-                                        if (stoppingToken.IsCancellationRequested || scanToken.IsCancellationRequested || !pipeServer.IsConnected) break;
+                                        var foundFiles = new System.Collections.Generic.List<ulong>();
+                                        StringComparison comp = request.AdvCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+                                        foreach (var entry in mftTable)
+                                        {
+                                            if (scanToken.IsCancellationRequested || !pipeServer.IsConnected) { driveState.Stop(); break; }
+
+                                            if (!request.IsAdvanced)
+                                            {
+                                                if (!string.IsNullOrEmpty(request.BasicQuery) && entry.Value.fileName != null && entry.Value.fileName.Contains(request.BasicQuery, StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    foundFiles.Add(entry.Key);
+                                                    // Massive Optimization: Stop filling RAM with millions of basic matches since the UI only displays 100 anyway!
+                                                    if (foundFiles.Count >= 200) break;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                string ext = Path.GetExtension(entry.Value.fileName) ?? "";
+                                                bool matchesType = true;
+                                                if (!string.IsNullOrEmpty(request.AdvFileType) && request.AdvFileType != "Everything")
+                                                {
+                                                    matchesType = request.AdvFileType switch
+                                                    {
+                                                        "Audio" => AudioExts.Contains(ext),
+                                                        "Compressed" => CompressedExts.Contains(ext),
+                                                        "Document" => DocumentExts.Contains(ext),
+                                                        "Executable" => ExecutableExts.Contains(ext),
+                                                        "Image" => ImageExts.Contains(ext),
+                                                        "Video" => VideoExts.Contains(ext),
+                                                        "Folder" => ext == "", // Quick prune
+                                                        _ => true
+                                                    };
+                                                }
+                                                if (!matchesType) continue;
+
+                                                bool name1Match = string.IsNullOrEmpty(request.AdvName1) || (entry.Value.fileName != null && entry.Value.fileName.Contains(request.AdvName1, comp));
+                                                bool name2Match = string.IsNullOrEmpty(request.AdvName2) || (entry.Value.fileName != null && entry.Value.fileName.Contains(request.AdvName2, comp));
+
+                                                if (name1Match && name2Match)
+                                                {
+                                                    foundFiles.Add(entry.Key);
+                                                }
+                                            }
+                                        }
+
+                                        string GetFullPath(ulong fileId)
+                                        {
+                                            var pathParts = new System.Collections.Generic.List<string>();
+                                            ulong currentId = fileId;
+                                            int depth = 0;
+                                            while (mftTable.TryGetValue(currentId, out var entry))
+                                            {
+                                                pathParts.Add(entry.fileName);
+                                                // Add a depth limit to prevent infinite loops (OutOfMemory crashes) from cyclic MFT corruption
+                                                if (entry.parentId == currentId || entry.parentId == 0 || depth++ > 128) break;
+                                                currentId = entry.parentId;
+                                            }
+                                            pathParts.Reverse();
+                                            if (pathParts.Count > 0 && (pathParts[0] == "." || pathParts[0] == ""))
+                                            {
+                                                pathParts.RemoveAt(0);
+                                            }
+                                            return d + ":\\" + string.Join("\\", pathParts);
+                                        }
 
                                         if (!request.IsAdvanced)
                                         {
-                                            if (!string.IsNullOrEmpty(request.BasicQuery) && entry.Value.fileName != null && entry.Value.fileName.Contains(request.BasicQuery, StringComparison.OrdinalIgnoreCase))
+                                            int basicMatchCount = 0;
+                                            foreach (var fileId in foundFiles)
                                             {
-                                                foundFiles.Add(entry.Key);
-                                                // Massive Optimization: Stop filling RAM with millions of basic matches since the UI only displays 100 anyway!
-                                                if (foundFiles.Count >= 200) break;
+                                                if (scanToken.IsCancellationRequested || !pipeServer.IsConnected) { driveState.Stop(); break; }
+                                                string fullPath = GetFullPath(fileId);
+                                                lock (writer)
+                                                {
+                                                    try { writer.WriteLine(fullPath); } catch { searchCts.Cancel(); driveState.Stop(); break; }
+                                                }
+
+                                                // Prevent choking the Named Pipe / UI with massive result streams
+                                                if (++basicMatchCount >= 200) break;
                                             }
                                         }
                                         else
                                         {
-                                            string ext = Path.GetExtension(entry.Value.fileName) ?? "";
-                                            bool matchesType = true;
-                                            if (!string.IsNullOrEmpty(request.AdvFileType) && request.AdvFileType != "Everything")
+                                            Parallel.ForEach(foundFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, (fileId, state) =>
                                             {
-                                                matchesType = request.AdvFileType switch
+                                                if (scanToken.IsCancellationRequested || !pipeServer.IsConnected) { state.Stop(); return; }
+
+                                                string fullPath = GetFullPath(fileId);
+
+                                                if (!string.IsNullOrEmpty(request.AdvLocation) && !fullPath.StartsWith(request.AdvLocation, StringComparison.OrdinalIgnoreCase))
                                                 {
-                                                    "Audio" => AudioExts.Contains(ext),
-                                                    "Compressed" => CompressedExts.Contains(ext),
-                                                    "Document" => DocumentExts.Contains(ext),
-                                                    "Executable" => ExecutableExts.Contains(ext),
-                                                    "Image" => ImageExts.Contains(ext),
-                                                    "Video" => VideoExts.Contains(ext),
-                                                    "Folder" => ext == "", // Quick prune
-                                                    _ => true
-                                                };
-                                            }
-                                            if (!matchesType) continue;
-
-                                            bool name1Match = string.IsNullOrEmpty(request.AdvName1) || (entry.Value.fileName != null && entry.Value.fileName.Contains(request.AdvName1, comp));
-                                            bool name2Match = string.IsNullOrEmpty(request.AdvName2) || (entry.Value.fileName != null && entry.Value.fileName.Contains(request.AdvName2, comp));
-
-                                            if (name1Match && name2Match)
-                                            {
-                                                foundFiles.Add(entry.Key);
-                                            }
-                                        }
-                                    }
-
-                                    string GetFullPath(ulong fileId)
-                                    {
-                                        var pathParts = new System.Collections.Generic.List<string>();
-                                        ulong currentId = fileId;
-                                        int depth = 0;
-                                        while (mftTable.TryGetValue(currentId, out var entry))
-                                        {
-                                            pathParts.Add(entry.fileName);
-                                            // Add a depth limit to prevent infinite loops (OutOfMemory crashes) from cyclic MFT corruption
-                                            if (entry.parentId == currentId || entry.parentId == 0 || depth++ > 128) break;
-                                            currentId = entry.parentId;
-                                        }
-                                        pathParts.Reverse();
-                                        if (pathParts.Count > 0 && (pathParts[0] == "." || pathParts[0] == ""))
-                                        {
-                                            pathParts.RemoveAt(0);
-                                        }
-                                        return d + ":\\" + string.Join("\\", pathParts);
-                                    }
-
-                                    if (!request.IsAdvanced)
-                                    {
-                                        int basicMatchCount = 0;
-                                        foreach (var fileId in foundFiles)
-                                        {
-                                            if (stoppingToken.IsCancellationRequested || scanToken.IsCancellationRequested || !pipeServer.IsConnected) break;
-                                            string fullPath = GetFullPath(fileId);
-                                            lock (writer)
-                                            {
-                                                try { writer.WriteLine(fullPath); } catch { break; }
-                                            }
-
-                                            // Prevent choking the Named Pipe / UI with massive result streams
-                                            if (++basicMatchCount >= 200) break;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Parallel.ForEach(foundFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, fileId =>
-                                        {
-                                            if (stoppingToken.IsCancellationRequested || scanToken.IsCancellationRequested || !pipeServer.IsConnected) return;
-
-                                            string fullPath = GetFullPath(fileId);
-
-                                            if (!string.IsNullOrEmpty(request.AdvLocation) && !fullPath.StartsWith(request.AdvLocation, StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                return;
-                                            }
-
-                                            if (request.AdvFileType == "Folder")
-                                            {
-                                                if (!Directory.Exists(fullPath)) return;
-                                            }
-
-                                            bool hasContent1 = !string.IsNullOrEmpty(request.AdvContent1);
-                                            bool hasContent2 = !string.IsNullOrEmpty(request.AdvContent2);
-
-                                            if (hasContent1 || hasContent2)
-                                            {
-                                                bool isPdf = fullPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
-                                                bool isArchive = fullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
-                                                                 fullPath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ||
-                                                                 fullPath.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) ||
-                                                                 fullPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) ||
-                                                                 fullPath.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase) ||
-                                                                 fullPath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase);
-
-                                                int caseSens = request.AdvCaseSensitive ? 1 : 0;
-
-                                                if (hasContent1)
-                                                {
-                                                    if (isPdf) { if (!SearchPdf(fullPath, request.AdvContent1!, request.AdvCaseSensitive)) return; }
-                                                    else if (isArchive) { if (FastGrepArchive(fullPath, request.AdvContent1!, caseSens) == 0) return; }
-                                                    else { if (FastGrepFile(fullPath, request.AdvContent1!, caseSens) == 0) return; }
+                                                    return;
                                                 }
 
-                                                if (hasContent2)
+                                                if (request.AdvFileType == "Folder")
                                                 {
-                                                    if (isPdf) { if (!SearchPdf(fullPath, request.AdvContent2!, request.AdvCaseSensitive)) return; }
-                                                    else if (isArchive) { if (FastGrepArchive(fullPath, request.AdvContent2!, caseSens) == 0) return; }
-                                                    else { if (FastGrepFile(fullPath, request.AdvContent2!, caseSens) == 0) return; }
+                                                    if (!Directory.Exists(fullPath)) return;
                                                 }
-                                            }
 
-                                            lock (writer)
-                                            {
-                                                try { writer.WriteLine(fullPath); } catch { }
-                                            }
-                                        });
+                                                bool hasContent1 = !string.IsNullOrEmpty(request.AdvContent1);
+                                                bool hasContent2 = !string.IsNullOrEmpty(request.AdvContent2);
+
+                                                if (hasContent1 || hasContent2)
+                                                {
+                                                    bool isPdf = fullPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+                                                    bool isArchive = fullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                                                                     fullPath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ||
+                                                                     fullPath.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) ||
+                                                                     fullPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) ||
+                                                                     fullPath.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase) ||
+                                                                     fullPath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase);
+
+                                                    int caseSens = request.AdvCaseSensitive ? 1 : 0;
+
+                                                    if (hasContent1)
+                                                    {
+                                                        if (isPdf) { if (!SearchPdf(fullPath, request.AdvContent1!, request.AdvCaseSensitive, scanToken)) return; }
+                                                        else if (isArchive) { if (FastGrepArchive(fullPath, request.AdvContent1!, caseSens, cancelFlag) == 0) return; }
+                                                        else { if (FastGrepFile(fullPath, request.AdvContent1!, caseSens, cancelFlag) == 0) return; }
+                                                    }
+
+                                                    if (hasContent2)
+                                                    {
+                                                        if (isPdf) { if (!SearchPdf(fullPath, request.AdvContent2!, request.AdvCaseSensitive, scanToken)) return; }
+                                                        else if (isArchive) { if (FastGrepArchive(fullPath, request.AdvContent2!, caseSens, cancelFlag) == 0) return; }
+                                                        else { if (FastGrepFile(fullPath, request.AdvContent2!, caseSens, cancelFlag) == 0) return; }
+                                                    }
+                                                }
+
+                                                lock (writer)
+                                                {
+                                                    try { writer.WriteLine(fullPath); } catch { searchCts.Cancel(); state.Stop(); driveState.Stop(); return; }
+                                                }
+                                            });
+                                        }
                                     }
-                                }
+                                });
                             });
+
+                            var disconnectTask = reader.ReadLineAsync(scanToken).AsTask();
+                            var completedTask = await Task.WhenAny(searchTask, disconnectTask);
+
+                            if (completedTask == disconnectTask)
+                            {
+                                searchCts.Cancel();
+                                try { await searchTask; } catch { }
+                            }
+                            else
+                            {
+                                if (pipeServer.IsConnected && !scanToken.IsCancellationRequested)
+                                {
+                                    try { writer.WriteLine("---EOF---"); } catch { }
+                                }
+                            }
                         }
                         catch (AggregateException ae)
                         {
@@ -445,10 +474,10 @@ namespace MBRDeep.BackendService
                                 Console.ResetColor();
                             }
                         }
-
-                        if (pipeServer.IsConnected && !scanToken.IsCancellationRequested)
+                        finally
                         {
-                            try { writer.WriteLine("---EOF---"); } catch { }
+                            searchCts.Cancel();
+                            Marshal.FreeHGlobal(cancelFlag);
                         }
                     }
                 }

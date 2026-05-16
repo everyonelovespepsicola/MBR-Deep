@@ -9,6 +9,6 @@
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\Create_TestFiles.ps1; Start-Process C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\dist\MBRDeep_Setup.exe"</Command>
+    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Set-ExecutionPolicy Bypass -Scope CurrentUser -Force; C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\Create_TestFiles.ps1; Start-Process C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\dist\MBRDeep_Setup.exe"</Command>
   </LogonCommand>
 </Configuration>

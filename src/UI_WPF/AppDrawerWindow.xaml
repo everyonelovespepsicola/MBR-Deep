@@ -471,13 +471,13 @@
                     <Setter Property="BorderThickness"
                             Value="0"/>
                     <Setter Property="FontSize"
-                            Value="26"/>
+                            Value="34"/>
                     <Setter Property="FontFamily"
                             Value="Segoe MDL2 Assets"/>
                     <Setter Property="Width"
-                            Value="60"/>
+                            Value="120"/>
                     <Setter Property="Height"
-                            Value="60"/>
+                            Value="120"/>
                     <Setter Property="Margin"
                             Value="0,0,0,15"/>
                     <Setter Property="Cursor"
@@ -505,11 +505,15 @@
                 </Style>
             </Grid.Resources>
 
-            <StackPanel VerticalAlignment="Center">
+            <StackPanel VerticalAlignment="Center"
+                        DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
 
-                <Button Content="&#xE8A6;"
-                        ToolTip="This PC"
+                <Button ToolTip="This PC"
                         Click="Sidebar_Computer_Click">
+                    <Image Source="{Binding IconThisPC}"
+                           Width="72"
+                           Height="72"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Open"
@@ -524,9 +528,12 @@
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
-                <Button Content="&#xE713;"
-                        ToolTip="Control Panel"
+                <Button ToolTip="Control Panel"
                         Click="Sidebar_ControlPanel_Click">
+                    <Image Source="{Binding IconControlPanel}"
+                           Width="72"
+                           Height="72"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Open"
@@ -550,15 +557,27 @@
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
-                <Button Content="&#xE772;"
-                        ToolTip="Devices and Printers"
-                        Click="Sidebar_Devices_Click"/>
-                <Button Content="&#xE179;"
-                        ToolTip="Default Apps"
-                        Click="Sidebar_DefaultApps_Click"/>
-                <Button Content="&#xE9D9;"
-                        ToolTip="Performance"
-                        Click="Sidebar_Performance_Click"/>
+                <Button ToolTip="Devices and Printers"
+                        Click="Sidebar_Devices_Click">
+                    <Image Source="{Binding IconDevices}"
+                           Width="72"
+                           Height="72"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Button>
+                <Button ToolTip="Default Apps"
+                        Click="Sidebar_DefaultApps_Click">
+                    <Image Source="{Binding IconDefaultApps}"
+                           Width="72"
+                           Height="72"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Button>
+                <Button ToolTip="Performance"
+                        Click="Sidebar_Performance_Click">
+                    <Image Source="{Binding IconPerformance}"
+                           Width="72"
+                           Height="72"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Button>
             </StackPanel>
 
             <!-- Power Controls at Bottom Left -->

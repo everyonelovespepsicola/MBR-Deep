@@ -36,6 +36,12 @@ namespace AppDrawerXAML
         [DllImport("shell32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
 
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SHGetFileInfo(IntPtr ppidl, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+
+        [DllImport("shell32.dll")]
+        public static extern int SHGetSpecialFolderLocation(IntPtr hwndOwner, int nFolder, out IntPtr ppidl);
+
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool DestroyIcon(IntPtr hIcon);
@@ -45,6 +51,8 @@ namespace AppDrawerXAML
         private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
         private const uint SHGFI_LARGEICON = 0x000000000; // 0x0 implies Large icon
         private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+        private const uint SHGFI_PIDL = 0x00000008;
+        private const int CSIDL_DRIVES = 0x0011; // My Computer / This PC
 
         // --- Windows API for Global Hotkey ---
         [DllImport("user32.dll")]
@@ -92,9 +100,16 @@ namespace AppDrawerXAML
         private DateTime _lastDeactivated;
         private bool _isAdvSearching = false;
 
+        public ImageSource? IconThisPC { get; set; }
+        public ImageSource? IconControlPanel { get; set; }
+        public ImageSource? IconDevices { get; set; }
+        public ImageSource? IconDefaultApps { get; set; }
+        public ImageSource? IconPerformance { get; set; }
+
         public AppDrawerWindow()
         {
             InitializeComponent();
+            LoadSidebarIcons();
             SearchResults = new ObservableCollection<SearchResult>();
 
             // Set up CollectionViewSource for Grouping
@@ -154,6 +169,41 @@ namespace AppDrawerXAML
                 {
                     SearchBox.Focus();
                     SearchBox.SelectAll();
+                }
+                else
+                {
+                    // Reset the UI cleanly when the window is hidden
+                    SearchBox.Text = "";
+
+                    AdvName1.Text = "";
+                    AdvName2.Text = "";
+                    AdvContent1.Text = "";
+                    AdvContent2.Text = "";
+                    AdvLocation.Text = "";
+                    AdvFileType.SelectedIndex = 0;
+                    AdvCaseSensitive.IsChecked = false;
+
+                    foreach (var child in AdvDrivePanel.Children)
+                    {
+                        if (child is System.Windows.Controls.RadioButton rb && rb.Content?.ToString() == "All")
+                        {
+                            rb.IsChecked = true;
+                            break;
+                        }
+                    }
+
+                    if (_isAdvSearching)
+                    {
+                        _searchCts?.Cancel();
+                        _isAdvSearching = false;
+                        AdvSearchActionBtn.Content = "Search";
+                        AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                    }
+
+                    AdvancedPanel.Visibility = Visibility.Collapsed;
+                    BasicSearchPanel.Visibility = Visibility.Visible;
+
+                    ShowDefaultApps();
                 }
             };
 
@@ -405,6 +455,36 @@ namespace AppDrawerXAML
             catch { /* Ignore fallback errors */ }
 
             return null;
+        }
+
+        private void LoadSidebarIcons()
+        {
+            string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+            // Get the exact "This PC" virtual folder icon using its PIDL (Pointer to an Item ID List)
+            IntPtr pidl = IntPtr.Zero;
+            if (SHGetSpecialFolderLocation(IntPtr.Zero, CSIDL_DRIVES, out pidl) == 0 && pidl != IntPtr.Zero)
+            {
+                SHFILEINFO shinfo = new SHFILEINFO();
+                SHGetFileInfo(pidl, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL);
+                if (shinfo.hIcon != IntPtr.Zero)
+                {
+                    var img = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    img.Freeze();
+                    IconThisPC = img;
+                    DestroyIcon(shinfo.hIcon);
+                }
+                Marshal.FreeCoTaskMem(pidl); // Free the memory allocated by the Windows Shell
+            }
+            IconControlPanel = GetSpecificFileIcon(Path.Combine(sys32, "control.exe"));
+
+            string devicesExe = Path.Combine(sys32, "DeviceDisplayObjectProvider.exe");
+            if (!File.Exists(devicesExe)) devicesExe = Path.Combine(sys32, "DevicePairingWizard.exe");
+            IconDevices = GetSpecificFileIcon(devicesExe);
+
+            IconDefaultApps = GetSpecificFileIcon(Path.Combine(sys32, "computerdefaults.exe"));
+            IconPerformance = GetSpecificFileIcon(Path.Combine(sys32, "taskmgr.exe"));
         }
 
         private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)

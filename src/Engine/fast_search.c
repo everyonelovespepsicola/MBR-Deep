@@ -255,7 +255,7 @@ __declspec(dllexport) uint64_t ScanDriveWithCallback(const char* driveLetter, Fi
 }
 
 // New Function: High-speed grep for file contents using Memory-Mapped I/O
-__declspec(dllexport) int FastGrepFile(const char* filePath, const char* searchTerm, int caseSensitive) {
+__declspec(dllexport) int FastGrepFile(const char* filePath, const char* searchTerm, int caseSensitive, volatile char* isCancelled) {
     // 1. Open a direct handle to the file
     HANDLE hFile = CreateFileA(
         filePath,
@@ -288,41 +288,65 @@ __declspec(dllexport) int FastGrepFile(const char* filePath, const char* searchT
 
     if (fileData) {
         size_t termLen = strlen(searchTerm);
-        if (fileSize.QuadPart >= termLen) {
-            const char* end = fileData + fileSize.QuadPart - termLen;
-            const char* current = fileData;
 
-            // 4. Ultra-fast byte search using standard C memory functions
-            if (caseSensitive) {
-                while (current <= end) {
-                    current = (const char*)memchr(current, searchTerm[0], end - current + 1);
-                    if (!current) break; // The first letter wasn't found anywhere in the remaining bytes
+        // Prevent instant false-positives if an empty search string leaks through
+        if (termLen > 0 && fileSize.QuadPart >= termLen) {
 
-                    if (memcmp(current, searchTerm, termLen) == 0) {
-                        found = 1; // Match found!
-                        break;
+            // Structured Exception Handling to prevent instant service crashes if the file is modified/truncated while mapping
+            __try {
+                const char* end = fileData + fileSize.QuadPart - termLen;
+                const char* current = fileData;
+
+                // 4. Ultra-fast byte search using standard C memory functions
+                if (caseSensitive) {
+                    while (current <= end) {
+                        if (isCancelled && *isCancelled) break;
+
+                        size_t remain = end - current + 1;
+                        size_t chunk = remain > 1048576 ? 1048576 : remain; // Evaluate cancellation every 1MB
+                        const char* match = (const char*)memchr(current, searchTerm[0], chunk);
+                        if (!match) {
+                            current += chunk;
+                            continue;
+                        }
+                        current = match;
+
+                        if (memcmp(current, searchTerm, termLen) == 0) {
+                            found = 1; // Match found!
+                            break;
+                        }
+                        current++;
                     }
-                    current++;
-                }
-            } else {
-                char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
-                char upperFirst = (char)toupper((unsigned char)lowerFirst);
-                while (current <= end) {
-                    if (*current == lowerFirst || *current == upperFirst) {
-                        int match = 1;
-                        for (size_t i = 1; i < termLen; i++) {
-                            if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
-                                match = 0;
+                } else {
+                    char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
+                    char upperFirst = (char)toupper((unsigned char)lowerFirst);
+                    int chunkCount = 0;
+                    while (current <= end) {
+                        if (++chunkCount > 1048576) {
+                            if (isCancelled && *isCancelled) break;
+                            chunkCount = 0;
+                        }
+
+                        if (*current == lowerFirst || *current == upperFirst) {
+                            int match = 1;
+                            for (size_t i = 1; i < termLen; i++) {
+                                if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
+                                    match = 0;
+                                    break;
+                                }
+                            }
+                            if (match) {
+                                found = 1;
                                 break;
                             }
                         }
-                        if (match) {
-                            found = 1;
-                            break;
-                        }
+                        current++;
                     }
-                    current++;
                 }
+            }
+            __except(GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+                // If a hardware page fault occurs, safely skip the file instead of terminating the backend process
+                found = 0;
             }
         }
         UnmapViewOfFile(fileData);
@@ -334,7 +358,7 @@ __declspec(dllexport) int FastGrepFile(const char* filePath, const char* searchT
 }
 
 // New Function: Search inside ZIP, 7z, RAR, DOCX, PPTX using libarchive
-__declspec(dllexport) int FastGrepArchive(const char* archivePath, const char* searchTerm, int caseSensitive) {
+__declspec(dllexport) int FastGrepArchive(const char* archivePath, const char* searchTerm, int caseSensitive, volatile char* isCancelled) {
     struct archive *a = archive_read_new();
 
     // Tell libarchive to automatically figure out if it's ZIP, 7z, RAR, etc.
@@ -348,15 +372,62 @@ __declspec(dllexport) int FastGrepArchive(const char* archivePath, const char* s
 
     struct archive_entry *entry;
     size_t termLen = strlen(searchTerm);
+    if (termLen == 0) return 0;
+
     int found = 0;
 
     // Loop through every internal file in the archive
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        if (isCancelled && *isCancelled) break;
+
+        const char* entryName = archive_entry_pathname(entry);
+        if (entryName) {
+            size_t nameLen = strlen(entryName);
+            if (nameLen >= termLen) {
+                const char* current = entryName;
+                const char* end = current + nameLen - termLen;
+                if (caseSensitive) {
+                    while (current <= end) {
+                        current = (const char*)memchr(current, searchTerm[0], end - current + 1);
+                        if (!current) break; // First letter not found
+
+                        if (memcmp(current, searchTerm, termLen) == 0) {
+                            found = 1; // Match found!
+                            break;
+                        }
+                        current++;
+                    }
+                } else {
+                    char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
+                    char upperFirst = (char)toupper((unsigned char)lowerFirst);
+                    while (current <= end) {
+                        if (*current == lowerFirst || *current == upperFirst) {
+                            int match = 1;
+                            for (size_t i = 1; i < termLen; i++) {
+                                if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
+                                    match = 0;
+                                    break;
+                                }
+                            }
+                            if (match) {
+                                found = 1;
+                                break;
+                            }
+                        }
+                        current++;
+                    }
+                }
+            }
+        }
+        if (found) break; // Stop checking if we already matched the filename
+
         const void *buff;
         size_t size;
         int64_t offset;
 
         while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
+            if (isCancelled && *isCancelled) break;
+
             if (size >= termLen) {
                 const char* current = (const char*)buff;
                 const char* end = current + size - termLen;

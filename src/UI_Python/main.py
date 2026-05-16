@@ -162,10 +162,10 @@ my_dll.CountFilesInDrive.restype = ctypes.c_uint64
 my_dll.SearchByExtension.argtypes = [ctypes.c_char_p, ctypes.c_wchar_p]
 my_dll.SearchByExtension.restype = ctypes.c_uint64
 
-my_dll.FastGrepFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+my_dll.FastGrepFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
 my_dll.FastGrepFile.restype = ctypes.c_int
 
-my_dll.FastGrepArchive.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+my_dll.FastGrepArchive.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
 my_dll.FastGrepArchive.restype = ctypes.c_int
 
 # Define the Callback type (takes file ID, parent ID, and string)
@@ -341,21 +341,24 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                 is_archive = search_archives and full_path.lower().endswith(('.zip', '.7z', '.rar', '.docx', '.pptx', '.xlsx'))
                 is_pdf = full_path.lower().endswith('.pdf')
 
+                # Pass a null pointer for Python for now since Python uses an internal threading model
+                null_ptr = ctypes.c_void_p(0)
+
                 if content_1:
                     if is_pdf:
                         if not search_pdf(full_path, content_1, is_case_sensitive): return
                     elif is_archive:
-                        if not my_dll.FastGrepArchive(full_path.encode('utf-8'), content_1, is_case_sensitive): return
+                        if not my_dll.FastGrepArchive(full_path.encode('utf-8'), content_1, is_case_sensitive, null_ptr): return
                     else:
-                        if not my_dll.FastGrepFile(full_path.encode('utf-8'), content_1, is_case_sensitive): return
+                        if not my_dll.FastGrepFile(full_path.encode('utf-8'), content_1, is_case_sensitive, null_ptr): return
 
                 if content_2:
                     if is_pdf:
                         if not search_pdf(full_path, content_2, is_case_sensitive): return
                     elif is_archive:
-                        if not my_dll.FastGrepArchive(full_path.encode('utf-8'), content_2, is_case_sensitive): return
+                        if not my_dll.FastGrepArchive(full_path.encode('utf-8'), content_2, is_case_sensitive, null_ptr): return
                     else:
-                        if not my_dll.FastGrepFile(full_path.encode('utf-8'), content_2, is_case_sensitive): return
+                        if not my_dll.FastGrepFile(full_path.encode('utf-8'), content_2, is_case_sensitive, null_ptr): return
 
                 file_name = mft_table[file_id][1]
                 is_folder = os.path.isdir(full_path)

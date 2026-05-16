@@ -352,6 +352,47 @@ __declspec(dllexport) int FastGrepArchive(const char* archivePath, const char* s
 
     // Loop through every internal file in the archive
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        const char* entryName = archive_entry_pathname(entry);
+        if (entryName) {
+            size_t nameLen = strlen(entryName);
+            if (nameLen >= termLen) {
+                const char* current = entryName;
+                const char* end = current + nameLen - termLen;
+                if (caseSensitive) {
+                    while (current <= end) {
+                        current = (const char*)memchr(current, searchTerm[0], end - current + 1);
+                        if (!current) break; // First letter not found
+
+                        if (memcmp(current, searchTerm, termLen) == 0) {
+                            found = 1; // Match found!
+                            break;
+                        }
+                        current++;
+                    }
+                } else {
+                    char lowerFirst = (char)tolower((unsigned char)searchTerm[0]);
+                    char upperFirst = (char)toupper((unsigned char)lowerFirst);
+                    while (current <= end) {
+                        if (*current == lowerFirst || *current == upperFirst) {
+                            int match = 1;
+                            for (size_t i = 1; i < termLen; i++) {
+                                if (tolower((unsigned char)current[i]) != tolower((unsigned char)searchTerm[i])) {
+                                    match = 0;
+                                    break;
+                                }
+                            }
+                            if (match) {
+                                found = 1;
+                                break;
+                            }
+                        }
+                        current++;
+                    }
+                }
+            }
+        }
+        if (found) break; // Stop checking if we already matched the filename
+
         const void *buff;
         size_t size;
         int64_t offset;

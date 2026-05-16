@@ -49,3 +49,9 @@ try {
 }
 catch {
 }
+
+# Copy injected test files to the root of the C:\ drive
+$injectDir = "C:\Users\WDAGUtilityAccount\Desktop\MBR-Deep\inject"
+if (Test-Path $injectDir) {
+    Copy-Item -Path "$injectDir\1.pdf", "$injectDir\2.pdf", "$injectDir\3.pdf", "$injectDir\1.7z", "$injectDir\2.zip" -Destination "C:\" -Force -ErrorAction SilentlyContinue
+}

@@ -19,6 +19,9 @@ dotnet publish "$PSScriptRoot\src\BackendService\BackendService.csproj" -c Relea
 Write-Host "`n[3/5] Publishing App Drawer..." -ForegroundColor Yellow
 dotnet publish "$PSScriptRoot\src\UI_WPF\AppDrawerXAML.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Frontend"
 
+# Ensure the C-Engine DLL is explicitly copied to the UI folder so the global keyboard/mouse hooks function properly
+Copy-Item "$PSScriptRoot\src\Engine\fast_search.dll" "$payloadDir\Frontend\" -Force -ErrorAction SilentlyContinue
+
 # 4. Compress Payload
 Write-Host "`n[4/5] Compressing Payload..." -ForegroundColor Yellow
 $zipPath = "$distDir\payload.zip"
@@ -30,9 +33,9 @@ $installerDir = "$distDir\InstallerSource"
 New-Item -ItemType Directory -Path $installerDir | Out-Null
 
 $iconXml = ""
-if (Test-Path "$PSScriptRoot\icon3.ico") {
-    Copy-Item "$PSScriptRoot\icon3.ico" "$installerDir\icon3.ico" -Force
-    $iconXml = "<ApplicationIcon>icon3.ico</ApplicationIcon>"
+if (Test-Path "$PSScriptRoot\icon.ico") {
+  Copy-Item "$PSScriptRoot\icon.ico" "$installerDir\icon.ico" -Force
+  $iconXml = "<ApplicationIcon>icon.ico</ApplicationIcon>"
 }
 
 # Generate the C# Project File for the Installer
@@ -156,7 +159,9 @@ start /b cmd.exe /c ""ping 127.0.0.1 -n 2 >nul & rmdir /s /q ""{installDir}""""
                 Console.WriteLine("Launching MBR-Deep...");
                 Thread.Sleep(1000);
 
-                Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+                // Launch the UI through explorer.exe so it strips the Installer's Administrator privileges.
+                // This ensures the AppDrawer safely runs as a standard user process as intended!
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
             }
             catch (Exception ex)
             {

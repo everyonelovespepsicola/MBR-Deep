@@ -1,0 +1,4 @@
+Name Contains [                      ] Content Contains [                         ]
+And Contains  [                      ] Also Contains    [                         ]
+In Location   [                                        ] {     Seachbutton       }
+[] Case Sinsitive Drive radio buttons

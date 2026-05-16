@@ -1,0 +1,2 @@
+C:\projects\MBR-Deep\dist\StressTest\payload\Backend\BackendService.pdb
+C:\projects\MBR-Deep\dist\StressTest\payload\Backend\BackendService.exe
