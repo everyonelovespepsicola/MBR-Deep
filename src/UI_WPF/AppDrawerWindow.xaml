@@ -451,6 +451,51 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Mode Switcher Tab Style -->
+        <Style x:Key="TabRadioButtonStyle"
+               TargetType="RadioButton">
+            <Setter Property="Foreground"
+                    Value="#AAAAAA"/>
+            <Setter Property="Background"
+                    Value="Transparent"/>
+            <Setter Property="FontSize"
+                    Value="20"/>
+            <Setter Property="FontWeight"
+                    Value="SemiBold"/>
+            <Setter Property="Padding"
+                    Value="20,8"/>
+            <Setter Property="Margin"
+                    Value="10,0"/>
+            <Setter Property="Cursor"
+                    Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="20"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked"
+                                     Value="True">
+                                <Setter Property="Foreground"
+                                        Value="White"/>
+                                <Setter Property="Background"
+                                        Value="#33FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+                                <Setter Property="Foreground"
+                                        Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="50">
@@ -612,13 +657,34 @@
         <!-- Main Content Area -->
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- Mode Switcher Tabs -->
+            <StackPanel Grid.Row="0"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,15">
+                <RadioButton x:Name="TabApps"
+                             x:FieldModifier="public"
+                             Content="Apps"
+                             GroupName="ModeTabs"
+                             IsChecked="True"
+                             Style="{StaticResource TabRadioButtonStyle}"
+                             Checked="ModeTab_Changed"/>
+                <RadioButton x:Name="TabSettings"
+                             x:FieldModifier="public"
+                             Content="God Mode"
+                             GroupName="ModeTabs"
+                             Style="{StaticResource TabRadioButtonStyle}"
+                             Checked="ModeTab_Changed"/>
+            </StackPanel>
+
             <!-- WrapPanel to display files/apps as a grid of icons -->
             <ListBox x:Name="ResultsList"
-                     Grid.Row="0"
+                     Grid.Row="1"
                      Background="Transparent"
                      BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -734,21 +800,42 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <Grid Grid.Row="1"
+            <Grid Grid.Row="2"
                   Margin="0,0,0,-15"
                   HorizontalAlignment="Stretch">
                 <!-- Basic Search Bar & Advanced Button -->
                 <Grid x:Name="BasicSearchPanel"
-                      HorizontalAlignment="Center"
+                      HorizontalAlignment="Stretch"
                       Margin="0,0,0,5">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Margin="10,0,0,0">
+                        <RadioButton x:Name="SortAZ"
+                                     x:FieldModifier="public"
+                                     Content="A-Z"
+                                     GroupName="SortMode"
+                                     IsChecked="True"
+                                     Checked="SortMode_Changed"
+                                     Margin="0,0,15,0"/>
+                        <RadioButton x:Name="SortFav"
+                                     x:FieldModifier="public"
+                                     Content="Favorites"
+                                     GroupName="SortMode"
+                                     Checked="SortMode_Changed"/>
+                    </StackPanel>
 
                     <TextBox x:Name="SearchBox"
                              x:FieldModifier="public"
-                             Grid.Column="0"
+                             Grid.Column="1"
                              Height="50"
                              Width="720"
                              FontSize="24"
@@ -791,7 +878,7 @@
                     </TextBox>
 
                     <Button x:Name="BtnAdvanced"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             Width="50"
                             Height="50"
                             Margin="10,0,0,0"

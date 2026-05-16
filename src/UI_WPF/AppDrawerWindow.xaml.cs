@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -45,6 +46,12 @@ namespace AppDrawerXAML
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool DestroyIcon(IntPtr hIcon);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        public static extern int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+        [DllImport("shell32.dll")]
+        public static extern void ILFree(IntPtr pidl);
 
         private const uint SHGFI_ICON = 0x000000100;
         private const uint SHGFI_SMALLICON = 0x000000001;
@@ -89,6 +96,13 @@ namespace AppDrawerXAML
         // Cache for the Start Menu shortcuts so they appear instantly when clearing the search
         private List<SearchResult> _defaultAppDrawerCache = new List<SearchResult>();
 
+        // Cache for Windows Control Panel / God Mode tools
+        private List<SearchResult> _godModeCache = new List<SearchResult>();
+
+        // Analytics tracking for dynamic top row
+        private Dictionary<string, int> _appOpenCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private string _recentsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "recents.json");
+
         private string currentSearchTerm = "";
         private CancellationTokenSource? _searchCts;
 
@@ -117,8 +131,13 @@ namespace AppDrawerXAML
             cvs.GroupDescriptions.Add(new PropertyGroupDescription("Category"));
             ResultsList.ItemsSource = cvs.View;
 
+            LoadRecents();
+
             // Load Start Menu apps in the background instantly
             _ = LoadDefaultAppDrawerAsync();
+
+            // Load God Mode items in the background
+            _ = Task.Run(() => LoadGodModeItems());
 
             // Size the window to fill the screen but respect the taskbar
             this.Width = SystemParameters.WorkArea.Width;
@@ -336,6 +355,100 @@ namespace AppDrawerXAML
             base.OnClosed(e);
         }
 
+        private void LoadRecents()
+        {
+            try
+            {
+                if (File.Exists(_recentsFilePath))
+                {
+                    var json = File.ReadAllText(_recentsFilePath);
+                    var loaded = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+                    if (loaded != null) _appOpenCounts = new Dictionary<string, int>(loaded, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch { }
+        }
+
+        private void SaveRecents()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(_recentsFilePath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir!);
+                File.WriteAllText(_recentsFilePath, JsonSerializer.Serialize(_appOpenCounts));
+            }
+            catch { }
+        }
+
+        private void TrackAppOpen(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            _appOpenCounts[path] = _appOpenCounts.ContainsKey(path) ? _appOpenCounts[path] + 1 : 1;
+            SaveRecents();
+
+            // Silently rebuild the background cache so the drawer is perfectly updated next time it is summoned
+            _ = LoadDefaultAppDrawerAsync();
+        }
+
+        private void LoadGodModeItems()
+        {
+            var godModeApps = new List<SearchResult>();
+            try
+            {
+                // Instantiate Shell.Application on the UI (STA) thread to avoid COM interop crashes
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    Type? shellAppType = Type.GetTypeFromProgID("Shell.Application");
+                    if (shellAppType == null) return;
+                    dynamic shell = Activator.CreateInstance(shellAppType)!;
+                    dynamic folder = shell.NameSpace("shell:::{ED7BA470-8E54-465E-825C-99712043E01C}");
+
+                    if (folder != null)
+                    {
+                        foreach (dynamic item in folder.Items())
+                        {
+                            string name = item.Name;
+                            string rawPath = item.Path;
+
+                            // Extract the final {GUID} and format it properly for the Windows Shell
+                            string path = rawPath;
+                            int lastBrace = rawPath.LastIndexOf('{');
+                            if (lastBrace >= 0)
+                            {
+                                path = "shell:::" + rawPath.Substring(lastBrace);
+                            }
+
+                            ImageSource? icon = null;
+                            IntPtr pidl = IntPtr.Zero;
+                            uint sfgaoOut = 0;
+                            if (SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out sfgaoOut) == 0 && pidl != IntPtr.Zero)
+                            {
+                                SHFILEINFO shinfo = new SHFILEINFO();
+                                SHGetFileInfo(pidl, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL);
+                                if (shinfo.hIcon != IntPtr.Zero)
+                                {
+                                    icon = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                                    icon.Freeze();
+                                    DestroyIcon(shinfo.hIcon);
+                                }
+                                ILFree(pidl);
+                            }
+                            else
+                            {
+                                icon = GetSpecificFileIcon(path);
+                            }
+
+                            godModeApps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "God Mode" });
+                        }
+                    }
+                });
+            }
+            catch { }
+
+            godModeApps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+            _godModeCache = godModeApps;
+        }
+
         private async Task LoadDefaultAppDrawerAsync()
         {
             await Task.Run(() =>
@@ -353,6 +466,7 @@ namespace AppDrawerXAML
                             // Filter out uninstaller and help links
                             if (file.Contains("Uninstall", StringComparison.OrdinalIgnoreCase)) continue;
                             if (file.Contains("Help", StringComparison.OrdinalIgnoreCase)) continue;
+
                             shortcutPaths.Add(file);
                         }
                     }
@@ -363,15 +477,33 @@ namespace AppDrawerXAML
                 AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
                 AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
 
+                bool isFavoritesSort = false;
+                System.Windows.Application.Current.Dispatcher.Invoke(() => isFavoritesSort = SortFav.IsChecked == true);
+
                 foreach (var path in shortcutPaths)
                 {
-                    var icon = GetSpecificFileIcon(path);
+                    ImageSource? icon = null;
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => icon = GetSpecificFileIcon(path));
                     var name = Path.GetFileNameWithoutExtension(path);
                     apps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "Programs" });
                 }
 
-                // Sort alphabetically
-                apps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+                if (isFavoritesSort)
+                {
+                    apps.Sort((a, b) =>
+                    {
+                        int aCount = _appOpenCounts.TryGetValue(a.FileName ?? "", out int ac) ? ac : 0;
+                        int bCount = _appOpenCounts.TryGetValue(b.FileName ?? "", out int bc) ? bc : 0;
+                        if (aCount != bCount) return bCount.CompareTo(aCount);
+                        return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+                    });
+                }
+                else
+                {
+                    // Sort alphabetically
+                    apps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+                }
+
                 _defaultAppDrawerCache = apps;
             });
 
@@ -487,6 +619,39 @@ namespace AppDrawerXAML
             IconPerformance = GetSpecificFileIcon(Path.Combine(sys32, "taskmgr.exe"));
         }
 
+        private void SortMode_Changed(object sender, RoutedEventArgs e)
+        {
+            if (this.IsLoaded)
+            {
+                _ = LoadDefaultAppDrawerAsync();
+            }
+        }
+
+        private void ModeTab_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!this.IsLoaded) return;
+
+            SearchBox.Clear();
+            SearchBox.Focus();
+
+            if (TabSettings.IsChecked == true)
+            {
+                SearchResults.Clear();
+                foreach (var app in _godModeCache) SearchResults.Add(app);
+
+                SortAZ.Visibility = Visibility.Collapsed;
+                SortFav.Visibility = Visibility.Collapsed;
+                BtnAdvanced.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                SortAZ.Visibility = Visibility.Visible;
+                SortFav.Visibility = Visibility.Visible;
+                BtnAdvanced.Visibility = Visibility.Visible;
+                _ = LoadDefaultAppDrawerAsync();
+            }
+        }
+
         private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             currentSearchTerm = SearchBox.Text.ToLower();
@@ -496,6 +661,20 @@ namespace AppDrawerXAML
                 _searchCts?.Cancel();
                 ShowDefaultApps();
                 return;
+            }
+
+            if (TabSettings.IsChecked == true)
+            {
+                SearchResults.Clear();
+                var matchingSettings = _godModeCache
+                    .Where(s => string.IsNullOrWhiteSpace(currentSearchTerm) || (s.DisplayName != null && s.DisplayName.Contains(currentSearchTerm, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                foreach (var s in matchingSettings)
+                {
+                    SearchResults.Add(s);
+                }
+                return; // Do NOT trigger IPC when searching settings!
             }
 
             // 1. Cancel the previous search immediately if the user is still typing
@@ -851,8 +1030,15 @@ namespace AppDrawerXAML
             {
                 try
                 {
-                    // Opens Windows Explorer and selects the specific file
-                    Process.Start("explorer.exe", $"/select,\"{result.FileName}\"");
+                    if (result.FileName.StartsWith("shell:::", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}") { UseShellExecute = true });
+                    }
+                    else
+                    {
+                        // Opens Windows Explorer and selects the specific file
+                        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.FileName}\"") { UseShellExecute = true });
+                    }
                     this.Hide();
                 }
                 catch (Exception ex)
@@ -901,14 +1087,23 @@ namespace AppDrawerXAML
             {
                 try
                 {
-                    // Open the file or folder using the default Windows application
-                    new Process
+                    TrackAppOpen(result.FileName);
+
+                    if (result.FileName.StartsWith("shell:::", StringComparison.OrdinalIgnoreCase))
                     {
-                        StartInfo = new ProcessStartInfo(result.FileName)
+                        Process.Start(new ProcessStartInfo("explorer.exe", result.FileName) { UseShellExecute = true });
+                    }
+                    else
+                    {
+                        // Bulletproof launch method for UWP .lnk files, Executables, and Documents.
+                        // By piping through cmd.exe's native 'start' command, we completely bypass
+                        // the .NET Core UseShellExecute bugs that break modern UWP shortcuts!
+                        Process.Start(new ProcessStartInfo("cmd.exe", $"/c start \"\" \"{result.FileName}\"")
                         {
-                            UseShellExecute = true
-                        }
-                    }.Start();
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden
+                        });
+                    }
 
                     // Hide the app drawer after opening
                     this.Hide();
@@ -924,7 +1119,7 @@ namespace AppDrawerXAML
         private void Sidebar_Computer_Click(object sender, RoutedEventArgs e)
         {
             // Use the native shell GUID to instantly open "This PC"
-            try { Process.Start("explorer.exe", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_Computer_Manage_Click(object sender, RoutedEventArgs e)
@@ -948,74 +1143,74 @@ namespace AppDrawerXAML
         private void Sidebar_ControlPanel_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Control Panel
-            try { Process.Start("control.exe"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Network_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "/name Microsoft.NetworkAndSharingCenter"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.NetworkAndSharingCenter") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Mouse_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "main.cpl"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "main.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Power_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "powercfg.cpl"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "powercfg.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Programs_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "appwiz.cpl"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "appwiz.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Sound_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "mmsys.cpl"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "mmsys.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Users_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("control.exe", "/name Microsoft.UserAccounts"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.UserAccounts") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_ControlPanel_GodMode_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_Devices_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Devices and Printers panel
-            try { Process.Start("explorer.exe", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_DefaultApps_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Default Programs panel
-            try { Process.Start("control.exe", "/name Microsoft.DefaultPrograms"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.DefaultPrograms") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_Performance_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("taskmgr.exe"); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); this.Hide(); } catch { }
         }
 
         private void Sidebar_Power_Logout_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("shutdown.exe", "/l"); } catch { }
+            try { Process.Start(new ProcessStartInfo("shutdown.exe", "/l") { UseShellExecute = true }); } catch { }
         }
 
         private void Sidebar_Power_Restart_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("shutdown.exe", "/r /t 0"); } catch { }
+            try { Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = true }); } catch { }
         }
 
         private void Sidebar_Power_Shutdown_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start("shutdown.exe", "/s /t 0"); } catch { }
+            try { Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 0") { UseShellExecute = true }); } catch { }
         }
     }
 
