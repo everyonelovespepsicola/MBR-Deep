@@ -22,6 +22,10 @@ dotnet publish "$PSScriptRoot\src\UI_WPF\AppDrawerXAML.csproj" -c Release -r win
 # Ensure the C-Engine DLL is explicitly copied to the UI folder so the global keyboard/mouse hooks function properly
 Copy-Item "$PSScriptRoot\src\Engine\fast_search.dll" "$payloadDir\Frontend\" -Force -ErrorAction SilentlyContinue
 
+# Bundle the perfect God Mode .lnk shortcuts
+Write-Host "`n[*] Bundling God Mode Shortcuts..." -ForegroundColor Yellow
+Copy-Item "$PSScriptRoot\src\GodModeLinks" "$payloadDir\GodModeLinks" -Recurse -Force
+
 # 4. Compress Payload
 Write-Host "`n[4/5] Compressing Payload..." -ForegroundColor Yellow
 $zipPath = "$distDir\payload.zip"

@@ -222,7 +222,14 @@ namespace AppDrawerXAML
                     AdvancedPanel.Visibility = Visibility.Collapsed;
                     BasicSearchPanel.Visibility = Visibility.Visible;
 
-                    ShowDefaultApps();
+                    if (TabSettings.IsChecked == true)
+                    {
+                        SortMode_Changed(this, new RoutedEventArgs());
+                    }
+                    else
+                    {
+                        ShowDefaultApps();
+                    }
                 }
             };
 
@@ -392,61 +399,77 @@ namespace AppDrawerXAML
 
         private void LoadGodModeItems()
         {
-            var godModeApps = new List<SearchResult>();
-            try
+            // Spin up a dedicated background STA thread to prevent the UI from freezing during startup
+            Thread staThread = new Thread(() =>
             {
-                // Instantiate Shell.Application on the UI (STA) thread to avoid COM interop crashes
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                var godModeApps = new List<SearchResult>();
+                try
                 {
-                    Type? shellAppType = Type.GetTypeFromProgID("Shell.Application");
-                    if (shellAppType == null) return;
-                    dynamic shell = Activator.CreateInstance(shellAppType)!;
-                    dynamic folder = shell.NameSpace("shell:::{ED7BA470-8E54-465E-825C-99712043E01C}");
+                    // Grab the physical directory where the installer extracted our perfect shortcuts
+                    string targetDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "GodModeLinks");
 
-                    if (folder != null)
+                    // Fallback path for when running locally in development via 'dotnet run'
+                    if (!Directory.Exists(targetDirectory))
                     {
-                        foreach (dynamic item in folder.Items())
+                        targetDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "GodModeLinks");
+                    }
+
+                    if (Directory.Exists(targetDirectory))
+                    {
+                        foreach (var path in Directory.EnumerateFiles(targetDirectory, "*.lnk", SearchOption.TopDirectoryOnly))
                         {
-                            string name = item.Name;
-                            string rawPath = item.Path;
-
-                            // Extract the final {GUID} and format it properly for the Windows Shell
-                            string path = rawPath;
-                            int lastBrace = rawPath.LastIndexOf('{');
-                            if (lastBrace >= 0)
-                            {
-                                path = "shell:::" + rawPath.Substring(lastBrace);
-                            }
-
+                            string name = Path.GetFileNameWithoutExtension(path);
                             ImageSource? icon = null;
-                            IntPtr pidl = IntPtr.Zero;
-                            uint sfgaoOut = 0;
-                            if (SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out sfgaoOut) == 0 && pidl != IntPtr.Zero)
-                            {
-                                SHFILEINFO shinfo = new SHFILEINFO();
-                                SHGetFileInfo(pidl, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL);
-                                if (shinfo.hIcon != IntPtr.Zero)
-                                {
-                                    icon = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                                    icon.Freeze();
-                                    DestroyIcon(shinfo.hIcon);
-                                }
-                                ILFree(pidl);
-                            }
-                            else
+
+                            // Our existing bulletproof icon extractor grabs the embedded system icons perfectly
+                            System.Windows.Application.Current.Dispatcher.Invoke(() =>
                             {
                                 icon = GetSpecificFileIcon(path);
+                            });
+
+                            string subCategory = "General Tasks";
+                            if (!string.IsNullOrEmpty(name))
+                            {
+                                var parts = name.Split(new[] { ' ', '-' }, StringSplitOptions.RemoveEmptyEntries);
+                                if (parts.Length > 0)
+                                {
+                                    subCategory = parts[0];
+                                    if (subCategory.Equals("Change", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("View", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Add", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Set", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Turn", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Allow", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Create", StringComparison.OrdinalIgnoreCase) ||
+                                        subCategory.Equals("Manage", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        if (parts.Length > 1) subCategory = parts[1];
+                                    }
+                                }
                             }
 
-                            godModeApps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "God Mode" });
+                            godModeApps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "System-Tasks", MainCategory = "System-Tasks", SubCategory = subCategory });
                         }
                     }
-                });
-            }
-            catch { }
+                }
+                catch { }
 
-            godModeApps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
-            _godModeCache = godModeApps;
+                godModeApps.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+                _godModeCache = godModeApps;
+
+                // If the user is actively viewing the God Mode tab, refresh it instantly when the background load finishes
+                System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    if (TabSettings.IsChecked == true)
+                    {
+                        SortMode_Changed(this, new RoutedEventArgs());
+                    }
+                });
+            });
+
+            staThread.SetApartmentState(ApartmentState.STA);
+            staThread.IsBackground = true;
+            staThread.Start();
         }
 
         private async Task LoadDefaultAppDrawerAsync()
@@ -485,7 +508,17 @@ namespace AppDrawerXAML
                     ImageSource? icon = null;
                     System.Windows.Application.Current.Dispatcher.Invoke(() => icon = GetSpecificFileIcon(path));
                     var name = Path.GetFileNameWithoutExtension(path);
-                    apps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "Programs" });
+
+                    string subCategory = "General Apps";
+                    string parent = Path.GetFileName(Path.GetDirectoryName(path));
+                    if (!string.IsNullOrEmpty(parent) &&
+                        !string.Equals(parent, "Programs", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(parent, "Start Menu", StringComparison.OrdinalIgnoreCase))
+                    {
+                        subCategory = parent;
+                    }
+
+                    apps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "Programs", MainCategory = "Programs", SubCategory = subCategory });
                 }
 
                 if (isFavoritesSort)
@@ -510,7 +543,7 @@ namespace AppDrawerXAML
             // Populate the UI if the user hasn't typed anything yet
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
-                if (string.IsNullOrWhiteSpace(SearchBox.Text))
+                if (string.IsNullOrWhiteSpace(SearchBox.Text) && TabApps.IsChecked == true)
                 {
                     ShowDefaultApps();
                 }
@@ -520,8 +553,10 @@ namespace AppDrawerXAML
         private void ShowDefaultApps()
         {
             SearchResults.Clear();
+            bool showCategories = SortCategory.IsChecked == true;
             foreach (var app in _defaultAppDrawerCache)
             {
+                app.Category = showCategories ? app.SubCategory : app.MainCategory;
                 SearchResults.Add(app);
             }
         }
@@ -558,6 +593,55 @@ namespace AppDrawerXAML
 
         private ImageSource? GetSpecificFileIcon(string filePath)
         {
+            // 1. If it's a shortcut, read the RAW TARGET to completely bypass the Windows Shell arrow overlay!
+            if (filePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    IShellLink link = (IShellLink)new ShellLink();
+                    ((IPersistFile)link).Load(filePath, 0);
+
+                    link.GetIDList(out IntPtr targetPidl);
+
+                    if (targetPidl != IntPtr.Zero)
+                    {
+                        SHFILEINFO shinfoTarget = new SHFILEINFO();
+
+                        // Query the target directly - Windows won't add a shortcut arrow to the target itself!
+                        IntPtr hImgTarget = SHGetFileInfo(targetPidl, 0, ref shinfoTarget, (uint)Marshal.SizeOf(shinfoTarget), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL);
+
+                        if (shinfoTarget.hIcon != IntPtr.Zero)
+                        {
+                            ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                                shinfoTarget.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+
+                            DestroyIcon(shinfoTarget.hIcon);
+                            img.Freeze();
+                            ILFree(targetPidl);
+                            return img;
+                        }
+
+                        ILFree(targetPidl);
+                    }
+                }
+                catch { /* Ignore COM errors and fall back to standard extraction */ }
+            }
+
+            // 2. Try standard .NET executable extraction (very fast for EXEs, fails gracefully on virtual UWP targets)
+            try
+            {
+                using System.Drawing.Icon? pureIcon = System.Drawing.Icon.ExtractAssociatedIcon(filePath);
+                if (pureIcon != null)
+                {
+                    ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                        pureIcon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    img.Freeze();
+                    return img;
+                }
+            }
+            catch { /* Ignore extraction errors and fallback to the Windows Shell */ }
+
+            // 3. Final Fallback: Ask Windows for the generic file icon (will have an arrow if it's a .lnk)
             SHFILEINFO shinfo = new SHFILEINFO();
             // Query Windows for the *exact* embedded icon of this shortcut file
             IntPtr hImg = SHGetFileInfo(filePath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON);
@@ -571,20 +655,6 @@ namespace AppDrawerXAML
                 img.Freeze();
                 return img;
             }
-
-            // Fallback for tricky Chrome/Brave/Edge shortcuts or Advertised Shortcuts
-            try
-            {
-                using System.Drawing.Icon? fallbackIcon = System.Drawing.Icon.ExtractAssociatedIcon(filePath);
-                if (fallbackIcon != null)
-                {
-                    ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
-                        fallbackIcon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                    img.Freeze();
-                    return img;
-                }
-            }
-            catch { /* Ignore fallback errors */ }
 
             return null;
         }
@@ -621,7 +691,41 @@ namespace AppDrawerXAML
 
         private void SortMode_Changed(object sender, RoutedEventArgs e)
         {
-            if (this.IsLoaded)
+            if (!this.IsLoaded) return;
+
+            if (TabSettings.IsChecked == true)
+            {
+                string currentTerm = SearchBox.Text.ToLower();
+                SearchResults.Clear();
+                bool showCategories = SortCategory.IsChecked == true;
+
+                var matchingSettings = _godModeCache
+                    .Where(s => string.IsNullOrWhiteSpace(currentTerm) || (s.DisplayName != null && s.DisplayName.Contains(currentTerm, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                bool isFavoritesSort = SortFav.IsChecked == true;
+                if (isFavoritesSort)
+                {
+                    matchingSettings.Sort((a, b) =>
+                    {
+                        int aCount = _appOpenCounts.TryGetValue(a.FileName ?? "", out int ac) ? ac : 0;
+                        int bCount = _appOpenCounts.TryGetValue(b.FileName ?? "", out int bc) ? bc : 0;
+                        if (aCount != bCount) return bCount.CompareTo(aCount);
+                        return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+                    });
+                }
+                else
+                {
+                    matchingSettings.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+                }
+
+                foreach (var app in matchingSettings)
+                {
+                    app.Category = showCategories ? app.SubCategory : app.MainCategory;
+                    SearchResults.Add(app);
+                }
+            }
+            else
             {
                 _ = LoadDefaultAppDrawerAsync();
             }
@@ -636,17 +740,11 @@ namespace AppDrawerXAML
 
             if (TabSettings.IsChecked == true)
             {
-                SearchResults.Clear();
-                foreach (var app in _godModeCache) SearchResults.Add(app);
-
-                SortAZ.Visibility = Visibility.Collapsed;
-                SortFav.Visibility = Visibility.Collapsed;
+                SortMode_Changed(sender, e);
                 BtnAdvanced.Visibility = Visibility.Collapsed;
             }
             else
             {
-                SortAZ.Visibility = Visibility.Visible;
-                SortFav.Visibility = Visibility.Visible;
                 BtnAdvanced.Visibility = Visibility.Visible;
                 _ = LoadDefaultAppDrawerAsync();
             }
@@ -659,21 +757,20 @@ namespace AppDrawerXAML
             if (string.IsNullOrWhiteSpace(currentSearchTerm))
             {
                 _searchCts?.Cancel();
-                ShowDefaultApps();
+                if (TabSettings.IsChecked == true)
+                {
+                    SortMode_Changed(sender, new RoutedEventArgs());
+                }
+                else
+                {
+                    ShowDefaultApps();
+                }
                 return;
             }
 
             if (TabSettings.IsChecked == true)
             {
-                SearchResults.Clear();
-                var matchingSettings = _godModeCache
-                    .Where(s => string.IsNullOrWhiteSpace(currentSearchTerm) || (s.DisplayName != null && s.DisplayName.Contains(currentSearchTerm, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-
-                foreach (var s in matchingSettings)
-                {
-                    SearchResults.Add(s);
-                }
+                SortMode_Changed(sender, new RoutedEventArgs());
                 return; // Do NOT trigger IPC when searching settings!
             }
 
@@ -696,8 +793,12 @@ namespace AppDrawerXAML
                     .Where(app => app.DisplayName != null && app.DisplayName.Contains(currentSearchTerm, StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
+                bool showCategories = false;
+                System.Windows.Application.Current.Dispatcher.Invoke(() => showCategories = SortCategory.IsChecked == true);
+
                 foreach (var app in matchingApps)
                 {
+                    app.Category = showCategories ? app.SubCategory : app.MainCategory;
                     SearchResults.Add(app);
                 }
 
@@ -740,7 +841,9 @@ namespace AppDrawerXAML
                                         FileName = resultPath,
                                         DisplayName = Path.GetFileName(resultPath),
                                         Icon = icon,
-                                        Category = "Files"
+                                        Category = "Files",
+                                        MainCategory = "Files",
+                                        SubCategory = "Files"
                                     });
                                 }
                             });
@@ -916,7 +1019,9 @@ namespace AppDrawerXAML
                                         FileName = resultPath,
                                         DisplayName = Path.GetFileName(resultPath),
                                         Icon = icon,
-                                        Category = "Advanced Results"
+                                        Category = "Advanced Results",
+                                        MainCategory = "Advanced Results",
+                                        SubCategory = "Advanced Results"
                                     });
                                 }
                             });
@@ -1009,6 +1114,35 @@ namespace AppDrawerXAML
             }
         }
 
+        private bool OpenShellItem(string rawPath, string verb = "open")
+        {
+            try
+            {
+                if (rawPath.StartsWith("::{ED7BA470-8E54-465E-825C-99712043E01C}", StringComparison.OrdinalIgnoreCase))
+                {
+                    Type? shellAppType = Type.GetTypeFromProgID("Shell.Application");
+                    if (shellAppType != null)
+                    {
+                        dynamic shell = Activator.CreateInstance(shellAppType)!;
+                        dynamic folder = shell.NameSpace("shell:::{ED7BA470-8E54-465E-825C-99712043E01C}");
+                        if (folder != null)
+                        {
+                            foreach (dynamic item in folder.Items())
+                            {
+                                if (string.Equals(item.Path, rawPath, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try { item.InvokeVerb(verb); } catch { }
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private SearchResult? GetResultFromMenuItem(object sender)
         {
             if (sender is System.Windows.Controls.MenuItem menuItem && menuItem.DataContext is SearchResult result)
@@ -1030,15 +1164,16 @@ namespace AppDrawerXAML
             {
                 try
                 {
-                    if (result.FileName.StartsWith("shell:::", StringComparison.OrdinalIgnoreCase))
+                    if (result.FileName.StartsWith("::{ED7BA470", StringComparison.OrdinalIgnoreCase))
                     {
-                        Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}") { UseShellExecute = true });
+                        // God Mode items don't have a physical location to select
+                        OpenShellItem(result.FileName, "open");
+                        this.Hide();
+                        return;
                     }
-                    else
-                    {
-                        // Opens Windows Explorer and selects the specific file
-                        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.FileName}\"") { UseShellExecute = true });
-                    }
+
+                    // Opens Windows Explorer and selects the specific file
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.FileName}\"") { UseShellExecute = true });
                     this.Hide();
                 }
                 catch (Exception ex)
@@ -1055,6 +1190,13 @@ namespace AppDrawerXAML
             {
                 try
                 {
+                    if (result.FileName.StartsWith("::{ED7BA470", StringComparison.OrdinalIgnoreCase))
+                    {
+                        OpenShellItem(result.FileName, "runas");
+                        this.Hide();
+                        return;
+                    }
+
                     new Process
                     {
                         StartInfo = new ProcessStartInfo(result.FileName)
@@ -1089,7 +1231,11 @@ namespace AppDrawerXAML
                 {
                     TrackAppOpen(result.FileName);
 
-                    if (result.FileName.StartsWith("shell:::", StringComparison.OrdinalIgnoreCase))
+                    if (result.FileName.StartsWith("::{ED7BA470", StringComparison.OrdinalIgnoreCase))
+                    {
+                        OpenShellItem(result.FileName, "open");
+                    }
+                    else if (result.FileName.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
                     {
                         Process.Start(new ProcessStartInfo("explorer.exe", result.FileName) { UseShellExecute = true });
                     }
@@ -1222,6 +1368,8 @@ namespace AppDrawerXAML
         // Changed from string to ImageSource for direct XAML binding
         public ImageSource? Icon { get; set; }
         public string Category { get; set; } = "Files";
+        public string MainCategory { get; set; } = "Files";
+        public string SubCategory { get; set; } = "Files";
     }
 
     public class SearchRequest
@@ -1236,5 +1384,47 @@ namespace AppDrawerXAML
         public bool AdvCaseSensitive { get; set; }
         public string? AdvDrive { get; set; }
         public string? AdvFileType { get; set; }
+    }
+
+    [ComImport]
+    [Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLink { }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLink
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszFile, int cchMaxPath, out IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszName, int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszDir, int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszArgs, int cchMaxPath);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("0000010B-0000-0000-C000-000000000046")]
+    internal interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder ppszFileName);
     }
 }

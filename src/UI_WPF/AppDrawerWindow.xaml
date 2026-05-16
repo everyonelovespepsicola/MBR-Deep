@@ -597,7 +597,7 @@
                             <MenuItem Header="User Accounts"
                                       Click="Sidebar_ControlPanel_Users_Click"/>
                             <Separator/>
-                            <MenuItem Header="God Mode"
+                            <MenuItem Header="System-Tasks"
                                       Click="Sidebar_ControlPanel_GodMode_Click"/>
                         </ContextMenu>
                     </Button.ContextMenu>
@@ -676,7 +676,7 @@
                              Checked="ModeTab_Changed"/>
                 <RadioButton x:Name="TabSettings"
                              x:FieldModifier="public"
-                             Content="God Mode"
+                             Content="System-Tasks"
                              GroupName="ModeTabs"
                              Style="{StaticResource TabRadioButtonStyle}"
                              Checked="ModeTab_Changed"/>
@@ -824,6 +824,12 @@
                                      Content="A-Z"
                                      GroupName="SortMode"
                                      IsChecked="True"
+                                     Checked="SortMode_Changed"
+                                     Margin="0,0,15,0"/>
+                        <RadioButton x:Name="SortCategory"
+                                     x:FieldModifier="public"
+                                     Content="Categories"
+                                     GroupName="SortMode"
                                      Checked="SortMode_Changed"
                                      Margin="0,0,15,0"/>
                         <RadioButton x:Name="SortFav"
