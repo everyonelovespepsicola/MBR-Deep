@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AppDrawerXAML")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+39918d5fa31544018fef8ff1b26290f9c128dd49")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e9f7fc13cc4623dd3f76b639e093545473c3803c")]
 [assembly: System.Reflection.AssemblyProductAttribute("AppDrawerXAML")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AppDrawerXAML")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

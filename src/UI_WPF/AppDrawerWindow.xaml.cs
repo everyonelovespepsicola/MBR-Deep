@@ -510,7 +510,7 @@ namespace AppDrawerXAML
                     var name = Path.GetFileNameWithoutExtension(path);
 
                     string subCategory = "General Apps";
-                    string parent = Path.GetFileName(Path.GetDirectoryName(path));
+                    string? parent = Path.GetFileName(Path.GetDirectoryName(path));
                     if (!string.IsNullOrEmpty(parent) &&
                         !string.Equals(parent, "Programs", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(parent, "Start Menu", StringComparison.OrdinalIgnoreCase))
@@ -578,13 +578,16 @@ namespace AppDrawerXAML
 
             if (shinfo.hIcon != IntPtr.Zero)
             {
-                ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                var img = Imaging.CreateBitmapSourceFromHIcon(
                     shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
 
                 DestroyIcon(shinfo.hIcon); // Prevent memory leaks!
-                img.Freeze();              // Essential for passing the image across threads!
+                img?.Freeze();             // Essential for passing the image across threads!
 
-                _iconCache[ext] = img;
+                if (img != null)
+                {
+                    _iconCache[ext] = img;
+                }
                 return img;
             }
 
@@ -612,11 +615,11 @@ namespace AppDrawerXAML
 
                         if (shinfoTarget.hIcon != IntPtr.Zero)
                         {
-                            ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                            var img = Imaging.CreateBitmapSourceFromHIcon(
                                 shinfoTarget.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
 
                             DestroyIcon(shinfoTarget.hIcon);
-                            img.Freeze();
+                            img?.Freeze();
                             ILFree(targetPidl);
                             return img;
                         }
@@ -633,9 +636,9 @@ namespace AppDrawerXAML
                 using System.Drawing.Icon? pureIcon = System.Drawing.Icon.ExtractAssociatedIcon(filePath);
                 if (pureIcon != null)
                 {
-                    ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                    var img = Imaging.CreateBitmapSourceFromHIcon(
                         pureIcon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                    img.Freeze();
+                    img?.Freeze();
                     return img;
                 }
             }
@@ -648,11 +651,11 @@ namespace AppDrawerXAML
 
             if (shinfo.hIcon != IntPtr.Zero)
             {
-                ImageSource img = Imaging.CreateBitmapSourceFromHIcon(
+                var img = Imaging.CreateBitmapSourceFromHIcon(
                     shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
 
                 DestroyIcon(shinfo.hIcon);
-                img.Freeze();
+                img?.Freeze();
                 return img;
             }
 
@@ -673,7 +676,7 @@ namespace AppDrawerXAML
                 if (shinfo.hIcon != IntPtr.Zero)
                 {
                     var img = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                    img.Freeze();
+                    img?.Freeze();
                     IconThisPC = img;
                     DestroyIcon(shinfo.hIcon);
                 }
