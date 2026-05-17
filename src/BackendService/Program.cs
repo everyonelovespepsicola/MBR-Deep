@@ -180,9 +180,8 @@ namespace MBRDeep.BackendService
                             {
                                 isAuthorized = true; // Allow local developer debugging
                             }
-                            else if (string.Equals(exeName, "MBR-DeepDrawer", StringComparison.OrdinalIgnoreCase))
+                            else if (exeName != null && exeName.Contains("MBR-Deep", StringComparison.OrdinalIgnoreCase))
                             {
-                                // Prevent malware from renaming itself to MBR-DeepDrawer.exe by verifying its physical execution path
                                 if (exePath != null && exePath.Contains("MBR-Deep", StringComparison.OrdinalIgnoreCase))
                                 {
                                     isAuthorized = true;

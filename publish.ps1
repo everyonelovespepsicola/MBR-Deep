@@ -37,9 +37,9 @@ $installerDir = "$distDir\InstallerSource"
 New-Item -ItemType Directory -Path $installerDir | Out-Null
 
 $iconXml = ""
-if (Test-Path "$PSScriptRoot\icon.ico") {
-  Copy-Item "$PSScriptRoot\icon.ico" "$installerDir\icon.ico" -Force
-  $iconXml = "<ApplicationIcon>icon.ico</ApplicationIcon>"
+if (Test-Path "$PSScriptRoot\icon3.ico") {
+  Copy-Item "$PSScriptRoot\icon3.ico" "$installerDir\icon3.ico" -Force
+  $iconXml = "<ApplicationIcon>icon3.ico</ApplicationIcon>"
 }
 
 # Generate the C# Project File for the Installer
@@ -50,6 +50,9 @@ $csprojContent = @"
     <TargetFramework>net10.0-windows</TargetFramework>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     $iconXml
+    <AssemblyTitle>MBR-Deep Setup</AssemblyTitle>
+    <Description>MBR-Deep Installer</Description>
+    <Product>MBR-Deep</Product>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\payload.zip" LogicalName="payload.zip" />
@@ -113,14 +116,16 @@ namespace MBRDeepInstaller
                 Console.WriteLine("Installing Background Service...");
                 string backendExe = Path.Combine(installDir, "Backend", "MBR-DeepService.exe");
                 Process.Start(new ProcessStartInfo("sc.exe", $"create MBRDeepService binPath= \"{backendExe}\" start= auto") { CreateNoWindow = true }).WaitForExit();
+                Process.Start(new ProcessStartInfo("sc.exe", $"create MBRDeepService binPath= \"{backendExe}\" start= auto DisplayName= \"MBR-Deep Engine Service\"") { CreateNoWindow = true }).WaitForExit();
+                Process.Start(new ProcessStartInfo("sc.exe", $"description MBRDeepService \"MBR-Deep Background Search Engine\"") { CreateNoWindow = true }).WaitForExit();
                 Process.Start(new ProcessStartInfo("sc.exe", "start MBRDeepService") { CreateNoWindow = true }).WaitForExit();
 
                 Console.WriteLine("Creating Start Menu and Startup Shortcuts...");
                 string startMenu = Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
                 string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
                 string target = Path.Combine(installDir, "Frontend", "MBR-DeepDrawer.exe");
-                string startMenuLnk = Path.Combine(startMenu, "MBR-Deep.lnk");
-                string startupLnk = Path.Combine(startupFolder, "MBR-Deep.lnk");
+                string startMenuLnk = Path.Combine(startMenu, "MBR-Deep Search.lnk");
+                string startupLnk = Path.Combine(startupFolder, "MBR-Deep Search.lnk");
                 string psCommand = $"-NoProfile -Command \"$wshell = New-Object -ComObject WScript.Shell; $s = $wshell.CreateShortcut('{startMenuLnk}'); $s.TargetPath = '{target}'; $s.Save(); $s2 = $wshell.CreateShortcut('{startupLnk}'); $s2.TargetPath = '{target}'; $s2.Arguments = '-hidden'; $s2.Save()\"";
                 Process.Start(new ProcessStartInfo("powershell", psCommand) { CreateNoWindow = true }).WaitForExit();
 
@@ -185,7 +190,7 @@ Set-Content -Path "$installerDir\Program.cs" -Value $programContent
 
 # Build the standalone Installer EXE
 dotnet publish "$installerDir\Installer.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$distDir\Output"
-Move-Item "$distDir\Output\Installer.exe" "$distDir\MBRDeep_Setup.exe" -Force
+Move-Item "$distDir\Output\Installer.exe" "$distDir\MBRDeep_Installer.exe" -Force
 Remove-Item "$installerDir", "$payloadDir", "$distDir\Output", $zipPath -Recurse -Force
 
-Write-Host "`nDone! Your standalone installer is ready at: $distDir\MBRDeep_Setup.exe" -ForegroundColor Green
+Write-Host "`nDone! Your standalone installer is ready at: $distDir\MBRDeep_Installer.exe" -ForegroundColor Green

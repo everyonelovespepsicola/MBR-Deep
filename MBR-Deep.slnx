@@ -1,8 +1,8 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/BackendService/BackendService.csproj" />
+    <Project Path="src/BackendService/MBR-DeepService.csproj" />
   </Folder>
   <Folder Name="/src/UI_WPF/">
-    <Project Path="src/UI_WPF/AppDrawerXAML.csproj" />
+    <Project Path="src/UI_WPF/MBR-DeepDrawer.csproj" />
   </Folder>
 </Solution>

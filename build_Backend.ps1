@@ -1,11 +1,11 @@
 Write-Host "Setting up MBR-Deep Backend Service Build..." -ForegroundColor Cyan
 
 $backendDir = "src\BackendService"
-$csprojPath = Join-Path $backendDir "BackendService.csproj"
+$csprojPath = Join-Path $backendDir "MBR-DeepService.csproj"
 
 # Kill any existing backend processes so we can overwrite the executable
 Write-Host "Stopping any running BackendService processes..." -ForegroundColor Yellow
-Stop-Process -Name "BackendService" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "MBR-DeepService" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1 # Give the OS a second to release the file locks
 
 # Compile and Launch

@@ -1,2 +1,2 @@
-C:\projects\MBR-Deep\dist\payload\Frontend\AppDrawerXAML.pdb
-C:\projects\MBR-Deep\dist\payload\Frontend\AppDrawerXAML.exe
+C:\projects\MBR-Deep\dist\payload\Frontend\MBR-DeepDrawer.pdb
+C:\projects\MBR-Deep\dist\payload\Frontend\MBR-DeepDrawer.exe
