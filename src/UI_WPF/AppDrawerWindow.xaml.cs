@@ -40,6 +40,12 @@ namespace MBRDeepDrawer
         [DllImport("shell32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr SHGetFileInfo(IntPtr ppidl, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT { public int X; public int Y; }
+
+        [DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out POINT lpPoint);
+
         [DllImport("shell32.dll")]
         public static extern int SHGetSpecialFolderLocation(IntPtr hwndOwner, int nFolder, out IntPtr ppidl);
 
@@ -49,6 +55,38 @@ namespace MBRDeepDrawer
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+        // Used to simulate the Windows Key press
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        private const int DWMWA_CLOAKED = 14;
 
         [DllImport("shell32.dll")]
         public static extern void ILFree(IntPtr pidl);
@@ -60,6 +98,11 @@ namespace MBRDeepDrawer
         private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
         private const uint SHGFI_PIDL = 0x00000008;
         private const int CSIDL_DRIVES = 0x0011; // My Computer / This PC
+
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_SHOWWINDOW = 0x0040;
 
         // --- Windows API for Global Hotkey ---
         [DllImport("user32.dll")]
@@ -103,8 +146,34 @@ namespace MBRDeepDrawer
         private Dictionary<string, int> _appOpenCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private string _recentsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "recents.json");
 
+        // --- Settings State ---
+        private AppSettings _appSettings = new AppSettings();
+        private string _settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "config.json");
+        private bool _isInitializingSettings = false;
+
+        public static readonly DependencyProperty DrawerIconSizeProperty =
+            DependencyProperty.Register("DrawerIconSize", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(64.0));
+        public double DrawerIconSize
+        {
+            get { return (double)GetValue(DrawerIconSizeProperty); }
+            set { SetValue(DrawerIconSizeProperty, value); }
+        }
+
+        public static readonly DependencyProperty SidebarIconSizeProperty =
+            DependencyProperty.Register("SidebarIconSize", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(72.0));
+        public double SidebarIconSize
+        {
+            get { return (double)GetValue(SidebarIconSizeProperty); }
+            set { SetValue(SidebarIconSizeProperty, value); }
+        }
+
+        // --- Focus Management ---
+        private System.Windows.Threading.DispatcherTimer? _focusCheckTimer;
+        private uint _myPid;
+
         // --- Performance Dashboard State ---
         private System.Windows.Threading.DispatcherTimer? _perfTimer;
+        private CancellationTokenSource? _telemetryCts;
         private double[] _cpuHistory = new double[60];
         private double[] _ramHistory = new double[60];
         private double[] _gpuHistory = new double[60];
@@ -123,6 +192,7 @@ namespace MBRDeepDrawer
         private System.Windows.Shapes.Polyline[]? _coreLines;
         private System.Windows.Shapes.Polygon[]? _coreShades;
         private TextBlock[]? _coreTexts;
+        private TextBlock[]? _coreTempTexts;
 
         private double[][]? _detailedDiskHistory;
         private Canvas[]? _detailedDiskCanvases;
@@ -149,11 +219,273 @@ namespace MBRDeepDrawer
         public ImageSource? IconDefaultApps { get; set; }
         public ImageSource? IconPerformance { get; set; }
 
+        private bool _isAnimating = false;
+        private Shaders.GenieEffect? _sharedGenieEffect;
+        private static readonly BitmapCache _sharedBitmapCache = new BitmapCache { EnableClearType = false, SnapsToDevicePixels = true };
+
+        private void HideDrawer()
+        {
+            if (!this.IsVisible || _isAnimating) return;
+
+            // Fallback to instant hide if the user selected "None" in the Settings
+            if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
+            {
+                this.Hide();
+                return;
+            }
+
+            _isAnimating = true;
+
+            try
+            {
+                double targetX = 0.5;
+                if (GetCursorPos(out POINT pt))
+                {
+                    targetX = (double)pt.X / SystemParameters.PrimaryScreenWidth;
+                    targetX = Math.Max(0.0, Math.Min(1.0, targetX));
+                }
+
+                if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
+
+                _sharedGenieEffect.TargetX = targetX;
+                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null); // Clear old animation
+                _sharedGenieEffect.Progress = 0.0;
+
+                RootGrid.CacheMode = _sharedBitmapCache;
+                RootGrid.Effect = _sharedGenieEffect; // Apply the GPU shader directly to the UI tree
+
+                var anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                {
+                    EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                };
+                anim.Completed += (s, e) =>
+                {
+                    RootGrid.Effect = null;
+                    RootGrid.CacheMode = null;
+                    this.Hide();
+                    _isAnimating = false;
+                };
+                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+            }
+            catch { this.Hide(); _isAnimating = false; }
+        }
+
+        private void ShowDrawer()
+        {
+            if (_isAnimating) return;
+
+            if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
+            {
+                this.Show();
+                ForceForeground();
+                return;
+            }
+            _isAnimating = true;
+
+            try
+            {
+                double targetX = 0.5;
+                if (GetCursorPos(out POINT pt))
+                {
+                    targetX = (double)pt.X / SystemParameters.PrimaryScreenWidth;
+                    targetX = Math.Max(0.0, Math.Min(1.0, targetX));
+                }
+
+                if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
+
+                _sharedGenieEffect.TargetX = targetX;
+                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null); // Clear old animation
+                _sharedGenieEffect.Progress = 1.0;
+
+                RootGrid.CacheMode = _sharedBitmapCache;
+                RootGrid.Effect = _sharedGenieEffect;
+
+                // Show the window AFTER setting Progress = 1.0 to prevent a 1-frame visual pop/flicker
+                this.Show();
+                ForceForeground();
+
+                var anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                {
+                    EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                };
+                anim.Completed += (s, e) =>
+                {
+                    RootGrid.Effect = null;
+                    RootGrid.CacheMode = null;
+                    _isAnimating = false;
+                };
+                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+            }
+            catch { this.Show(); ForceForeground(); _isAnimating = false; }
+        }
+
+        private void ForceForeground()
+        {
+            IntPtr targetHwnd = new WindowInteropHelper(this).Handle;
+            IntPtr foregroundHwnd = GetForegroundWindow();
+
+            // 1. Explicitly Force Foreground Z-Ordering as Topmost
+            SetWindowPos(targetHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+            if (targetHwnd != foregroundHwnd && foregroundHwnd != IntPtr.Zero)
+            {
+                uint targetThreadId = GetWindowThreadProcessId(targetHwnd, out _);
+                uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
+
+                // Trick Windows by attaching our thread to the active foreground thread
+                if (foregroundThreadId != targetThreadId)
+                {
+                    AttachThreadInput(foregroundThreadId, targetThreadId, true);
+                    SetForegroundWindow(targetHwnd);
+                    AttachThreadInput(foregroundThreadId, targetThreadId, false);
+                }
+                else
+                {
+                    SetForegroundWindow(targetHwnd);
+                }
+            }
+            else
+            {
+                SetForegroundWindow(targetHwnd);
+            }
+
+            this.Activate();
+            this.Focus();
+            SearchBox.Focus();
+        }
+
+        private static bool IsWindowActuallyVisible(IntPtr hWnd)
+        {
+            if (!IsWindowVisible(hWnd)) return false;
+
+            // UWP apps (like the Start Menu) are often kept running and WS_VISIBLE,
+            // but are "cloaked" by the DWM when closed. We must check the cloaked state!
+            if (DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0)
+            {
+                return cloaked == 0;
+            }
+            return true;
+        }
+
+        private bool DismissNativeStartMenuIfVisible()
+        {
+            bool dismissed = false;
+
+            // Windows 10 / 11 Native Start Menu
+            IntPtr nativeStart1 = FindWindow("Windows.UI.Core.CoreWindow", "Start");
+            if (nativeStart1 != IntPtr.Zero && IsWindowActuallyVisible(nativeStart1)) dismissed = true;
+
+            // Alternate Windows 11 Start Menu host class
+            IntPtr nativeStart2 = FindWindow("Windows.UI.Composition.DesktopWindowContentBridge", "Start");
+            if (nativeStart2 != IntPtr.Zero && IsWindowActuallyVisible(nativeStart2)) dismissed = true;
+
+            if (dismissed)
+            {
+                // The native menu is currently open on top of us! Send ESC to naturally dismiss it.
+                keybd_event(0x1B, 0, 0, 0);       // VK_ESCAPE Down
+                keybd_event(0x1B, 0, 0x0002, 0);  // VK_ESCAPE Up
+                return true;
+            }
+            return false;
+        }
+
+        private async Task StartTelemetryAsync(CancellationToken token)
+        {
+            try
+            {
+                using var pipeClient = new NamedPipeClientStream(".", "MBRDeepTelemetryPipe", PipeDirection.InOut, PipeOptions.Asynchronous);
+                await pipeClient.ConnectAsync(1000, token);
+
+                using var reader = new StreamReader(pipeClient, System.Text.Encoding.UTF8, leaveOpen: true);
+
+                while (pipeClient.IsConnected && !token.IsCancellationRequested)
+                {
+                    string? json = await reader.ReadLineAsync(token);
+                    if (json == null) break;
+
+                    var data = JsonSerializer.Deserialize<TelemetryData>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (data != null)
+                    {
+                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            string cpuTempStr = data.CpuTemp > 0 ? $"{data.CpuTemp:F0} °C" : "-- °C";
+                            string gpuTempStr = data.GpuTemp > 0 ? $"{data.GpuTemp:F0} °C" : "-- °C";
+
+                            CpuTempText.Text = cpuTempStr;
+                            GpuTempText.Text = gpuTempStr;
+
+                            var redBrush = new SolidColorBrush(System.Windows.Media.Colors.Red);
+                            var grayBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#aaaaaa"));
+                            var whiteBrush = new SolidColorBrush(System.Windows.Media.Colors.White);
+
+                            CpuTempText.Foreground = data.CpuTemp >= 90 ? redBrush : grayBrush;
+                            GpuTempText.Foreground = data.GpuTemp >= 90 ? redBrush : grayBrush;
+
+                            if (DetailedCpuTempText != null)
+                            {
+                                DetailedCpuTempText.Text = cpuTempStr;
+                                DetailedCpuTempText.Foreground = data.CpuTemp >= 90 ? redBrush : grayBrush;
+                            }
+                            if (DetailedGpuTempText != null)
+                            {
+                                DetailedGpuTempText.Text = gpuTempStr;
+                                DetailedGpuTempText.Foreground = data.GpuTemp >= 90 ? redBrush : whiteBrush;
+                            }
+
+                            if (_isDetailedCpuView && data.CoreTemps != null && _coreTempTexts != null)
+                            {
+                                for (int i = 0; i < _coreTempTexts.Length; i++)
+                                {
+                                    float temp = 0;
+                                    if (data.CoreTemps.TryGetValue(i, out float exactTemp)) temp = exactTemp;
+                                    else if (data.CoreTemps.TryGetValue(i / 2, out float htTemp)) temp = htTemp; // HT mapping fallback
+                                    else if (data.CoreTemps.Count > 0) temp = data.CoreTemps.Values.First(); // Catch-all fallback
+
+                                    if (temp > 0)
+                                    {
+                                        _coreTempTexts[i].Text = $"{temp:F0} °C";
+                                        _coreTempTexts[i].Foreground = temp >= 90 ? redBrush : grayBrush;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception) { /* Backend might not be running or busy */ }
+        }
+
         public AppDrawerWindow()
         {
             InitializeComponent();
             LoadSidebarIcons();
             SearchResults = new ObservableCollection<SearchResult>();
+
+            _myPid = (uint)Process.GetCurrentProcess().Id;
+            _focusCheckTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(100)
+            };
+            _focusCheckTimer.Tick += (s, e) =>
+            {
+                if (this.IsVisible)
+                {
+                    IntPtr targetHwnd = new WindowInteropHelper(this).Handle;
+                    IntPtr fgHwnd = GetForegroundWindow();
+
+                    if (fgHwnd != targetHwnd && fgHwnd != IntPtr.Zero)
+                    {
+                        GetWindowThreadProcessId(fgHwnd, out uint fgPid);
+
+                        if (fgPid != _myPid)
+                        {
+                            _lastDeactivated = DateTime.Now;
+                            HideDrawer();
+                        }
+                    }
+                }
+            };
 
             _perfTimer = new System.Windows.Threading.DispatcherTimer
             {
@@ -167,6 +499,7 @@ namespace MBRDeepDrawer
             ResultsList.ItemsSource = cvs.View;
 
             LoadRecents();
+            LoadSettings();
 
             // Load Start Menu apps in the background instantly
             _ = LoadDefaultAppDrawerAsync();
@@ -220,7 +553,7 @@ namespace MBRDeepDrawer
             this.Deactivated += (s, e) =>
             {
                 _lastDeactivated = DateTime.Now;
-                this.Hide();
+                HideDrawer();
             };
 
             // 3. Focus the search box instantly when the window is shown
@@ -228,6 +561,8 @@ namespace MBRDeepDrawer
             {
                 if (this.IsVisible)
                 {
+                    _focusCheckTimer?.Start();
+
                     if (TabPerf.IsChecked == true)
                     {
                         // Re-establish baselines so we don't average out hardware rates over the time the drawer was hidden
@@ -237,6 +572,10 @@ namespace MBRDeepDrawer
                         NativeMonitor.GetGpuUsageAndMemory();
                         if (_isDetailedCpuView) NativeMonitor.GetCoreUsages();
                         _perfTimer?.Start();
+
+                        _telemetryCts?.Cancel();
+                        _telemetryCts = new CancellationTokenSource();
+                        _ = StartTelemetryAsync(_telemetryCts.Token);
                     }
                     else
                     {
@@ -246,7 +585,9 @@ namespace MBRDeepDrawer
                 }
                 else
                 {
+                    _focusCheckTimer?.Stop();
                     _perfTimer?.Stop();
+                    _telemetryCts?.Cancel();
 
                     // Reset the UI cleanly when the window is hidden
                     SearchBox.Text = "";
@@ -287,17 +628,21 @@ namespace MBRDeepDrawer
             // 4. Hook the Keyboard via our fast unmanaged C-Engine
             _toggleCallback = () =>
             {
-                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(async () =>
                 {
                     // Prevent immediate re-opening if clicking the Start Button is what caused the window to lose focus and hide
-                    if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200) return;
-
-                    if (this.IsVisible) this.Hide();
-                    else
+                    if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200)
                     {
-                        this.Show();
-                        this.Activate();
+                        // Give the native menu a split second to appear, then kill it
+                        await Task.Delay(100);
+                        DismissNativeStartMenuIfVisible();
+                        return;
                     }
+
+                    bool nativeClosed = DismissNativeStartMenuIfVisible();
+
+                    if (this.IsVisible && !nativeClosed) HideDrawer();
+                    else ShowDrawer();
                 }));
             };
             InstallSystemHooks(_toggleCallback);
@@ -333,19 +678,82 @@ namespace MBRDeepDrawer
             }
         }
 
-        private void NotifyIcon_MouseClick(object? sender, System.Windows.Forms.MouseEventArgs e)
+        private void LoadSettings()
+        {
+            try
+            {
+                if (File.Exists(_settingsFilePath))
+                {
+                    var json = File.ReadAllText(_settingsFilePath);
+                    var loaded = JsonSerializer.Deserialize<AppSettings>(json);
+                    if (loaded != null) _appSettings = loaded;
+                }
+            }
+            catch { }
+
+            DrawerIconSize = _appSettings.DrawerIconSize;
+            SidebarIconSize = _appSettings.SidebarIconSize;
+            UpdateBackgroundColor();
+
+            _isInitializingSettings = true;
+            if (SettingsOpacitySlider != null) SettingsOpacitySlider.Value = _appSettings.BackgroundOpacity;
+            if (SettingsSpeedSlider != null) SettingsSpeedSlider.Value = _appSettings.AnimationSpeed;
+            if (SettingsDrawerIconSize != null) SettingsDrawerIconSize.Value = _appSettings.DrawerIconSize;
+            if (SettingsSidebarIconSize != null) SettingsSidebarIconSize.Value = _appSettings.SidebarIconSize;
+
+            if (SettingsColorPalette != null)
+            {
+                foreach (System.Windows.Controls.ComboBoxItem item in SettingsColorPalette.Items)
+                {
+                    if (item.Content?.ToString() == _appSettings.ColorPalette)
+                    {
+                        SettingsColorPalette.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+            if (SettingsEffect != null)
+            {
+                foreach (System.Windows.Controls.ComboBoxItem item in SettingsEffect.Items)
+                {
+                    if (item.Content?.ToString() == _appSettings.TransitionEffect)
+                    {
+                        SettingsEffect.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+            _isInitializingSettings = false;
+        }
+
+        private void SaveSettings()
+        {
+            if (_isInitializingSettings) return;
+            try
+            {
+                var dir = Path.GetDirectoryName(_settingsFilePath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir!);
+                File.WriteAllText(_settingsFilePath, JsonSerializer.Serialize(_appSettings, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch { }
+        }
+
+        private async void NotifyIcon_MouseClick(object? sender, System.Windows.Forms.MouseEventArgs e)
         {
             if (e.Button == System.Windows.Forms.MouseButtons.Left)
             {
                 // Prevent immediate re-opening if clicking the tray icon is what caused the window to lose focus and hide
-                if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200) return;
-
-                if (this.IsVisible) this.Hide();
-                else
+                if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200)
                 {
-                    this.Show();
-                    this.Activate(); // Bring window to the front
+                    await Task.Delay(100);
+                    DismissNativeStartMenuIfVisible();
+                    return;
                 }
+
+                bool nativeClosed = DismissNativeStartMenuIfVisible();
+
+                if (this.IsVisible && !nativeClosed) HideDrawer();
+                else ShowDrawer();
             }
         }
 
@@ -371,15 +779,10 @@ namespace MBRDeepDrawer
         {
             if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
             {
-                if (this.IsVisible)
-                {
-                    this.Hide();
-                }
-                else
-                {
-                    this.Show();
-                    this.Activate(); // Bring window to the front
-                }
+                bool nativeClosed = DismissNativeStartMenuIfVisible();
+
+                if (this.IsVisible && !nativeClosed) HideDrawer();
+                else ShowDrawer();
                 handled = true;
             }
             return IntPtr.Zero;
@@ -392,7 +795,7 @@ namespace MBRDeepDrawer
             if (!_isExplicitExit)
             {
                 e.Cancel = true;
-                this.Hide();
+                HideDrawer();
             }
             else
             {
@@ -796,6 +1199,9 @@ namespace MBRDeepDrawer
         {
             if (!this.IsLoaded) return;
 
+            if (SettingsDashboardGrid != null)
+                SettingsDashboardGrid.Visibility = Visibility.Collapsed;
+
             if (TabPerf.IsChecked == true)
             {
                 ResultsList.Visibility = Visibility.Collapsed;
@@ -812,6 +1218,10 @@ namespace MBRDeepDrawer
                 NativeMonitor.GetCpuUsage();
                 NativeMonitor.InitializeExtraCounters();
                 _perfTimer?.Start();
+
+                _telemetryCts?.Cancel();
+                _telemetryCts = new CancellationTokenSource();
+                _ = StartTelemetryAsync(_telemetryCts.Token);
             }
             else
             {
@@ -822,6 +1232,7 @@ namespace MBRDeepDrawer
                 DetailedDiskGrid.Visibility = Visibility.Collapsed;
                 DetailedNetGrid.Visibility = Visibility.Collapsed;
                 _perfTimer?.Stop();
+                _telemetryCts?.Cancel();
 
                 ResultsList.Visibility = Visibility.Visible;
                 BasicSearchPanel.Visibility = Visibility.Visible;
@@ -1260,13 +1671,13 @@ namespace MBRDeepDrawer
                     {
                         // God Mode items don't have a physical location to select
                         OpenShellItem(result.FileName, "open");
-                        this.Hide();
+                        HideDrawer();
                         return;
                     }
 
                     // Opens Windows Explorer and selects the specific file
                     Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.FileName}\"") { UseShellExecute = true });
-                    this.Hide();
+                    HideDrawer();
                 }
                 catch (Exception ex)
                 {
@@ -1285,7 +1696,7 @@ namespace MBRDeepDrawer
                     if (result.FileName.StartsWith("::{ED7BA470", StringComparison.OrdinalIgnoreCase))
                     {
                         OpenShellItem(result.FileName, "runas");
-                        this.Hide();
+                        HideDrawer();
                         return;
                     }
 
@@ -1297,7 +1708,7 @@ namespace MBRDeepDrawer
                             Verb = "runas" // Triggers the UAC elevation prompt
                         }
                     }.Start();
-                    this.Hide();
+                    HideDrawer();
                 }
                 catch (Exception)
                 {
@@ -1344,7 +1755,7 @@ namespace MBRDeepDrawer
                     }
 
                     // Hide the app drawer after opening
-                    this.Hide();
+                    HideDrawer();
                 }
                 catch (Exception ex)
                 {
@@ -1353,87 +1764,200 @@ namespace MBRDeepDrawer
             }
         }
 
+        private void UpdateBackgroundColor()
+        {
+            System.Windows.Media.Color baseColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.ColorPalette switch
+            {
+                "OLED Pitch Black" => "#000000",
+                "Crimson Red" => "#2b0000",
+                "Neon Green" => "#002b00",
+                _ => "#1C1C1C" // MBR-Deep Dark
+            });
+
+            baseColor.A = (byte)(_appSettings.BackgroundOpacity * 255);
+            this.Background = new SolidColorBrush(baseColor);
+        }
+
+        private void BtnOpenSettings_Click(object sender, RoutedEventArgs e)
+        {
+            TabApps.IsChecked = false;
+            TabSettings.IsChecked = false;
+            TabPerf.IsChecked = false;
+
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedCpuGrid.Visibility = Visibility.Collapsed;
+            DetailedRamGrid.Visibility = Visibility.Collapsed;
+            DetailedGpuGrid.Visibility = Visibility.Collapsed;
+            DetailedDiskGrid.Visibility = Visibility.Collapsed;
+            DetailedNetGrid.Visibility = Visibility.Collapsed;
+            ResultsList.Visibility = Visibility.Collapsed;
+            BasicSearchPanel.Visibility = Visibility.Collapsed;
+            AdvancedPanel.Visibility = Visibility.Collapsed;
+
+            _perfTimer?.Stop();
+            _telemetryCts?.Cancel();
+
+            SettingsDashboardGrid.Visibility = Visibility.Visible;
+        }
+
+        private void SettingsColorPalette_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (SettingsColorPalette.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+            {
+                _appSettings.ColorPalette = item.Content?.ToString() ?? "MBR-Deep Dark";
+                UpdateBackgroundColor();
+                SaveSettings();
+            }
+        }
+
+        private void SettingsOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.BackgroundOpacity = SettingsOpacitySlider.Value;
+            UpdateBackgroundColor();
+            SaveSettings();
+        }
+
+        private void SettingsEffect_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (SettingsEffect.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+            {
+                _appSettings.TransitionEffect = item.Content?.ToString() ?? "Genie";
+                SaveSettings();
+            }
+        }
+
+        private void SettingsSpeedSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.AnimationSpeed = SettingsSpeedSlider.Value;
+            SaveSettings();
+        }
+
+        private void SettingsDrawerIconSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.DrawerIconSize = SettingsDrawerIconSize.Value;
+            DrawerIconSize = _appSettings.DrawerIconSize;
+            SaveSettings();
+        }
+
+        private void SettingsSidebarIconSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.SidebarIconSize = SettingsSidebarIconSize.Value;
+            SidebarIconSize = _appSettings.SidebarIconSize;
+            SaveSettings();
+        }
+
         // --- Sidebar Navigation Click Handlers ---
         private void Sidebar_Computer_Click(object sender, RoutedEventArgs e)
         {
             // Use the native shell GUID to instantly open "This PC"
-            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_Computer_Manage_Click(object sender, RoutedEventArgs e)
         {
             // Launch Computer Management (Requires UAC)
-            try { Process.Start(new ProcessStartInfo("compmgmt.msc") { UseShellExecute = true, Verb = "runas" }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("compmgmt.msc") { UseShellExecute = true, Verb = "runas" }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_Computer_Classic_Click(object sender, RoutedEventArgs e)
         {
             // Launch classic System Properties (sysdm.cpl)
-            try { Process.Start(new ProcessStartInfo("sysdm.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("sysdm.cpl") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_Computer_Properties_Click(object sender, RoutedEventArgs e)
         {
             // Launch System Properties (maps to modern Settings > About on Win 10/11)
-            try { Process.Start(new ProcessStartInfo("control.exe", "system") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "system") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Control Panel
-            try { Process.Start(new ProcessStartInfo("control.exe") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Network_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.NetworkAndSharingCenter") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.NetworkAndSharingCenter") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Mouse_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "main.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "main.cpl") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Power_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "powercfg.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "powercfg.cpl") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Programs_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "appwiz.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "appwiz.cpl") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Sound_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "mmsys.cpl") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "mmsys.cpl") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_Users_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.UserAccounts") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.UserAccounts") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_ControlPanel_GodMode_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{ED7BA470-8E54-465E-825C-99712043E01C}") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_Devices_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Devices and Printers panel
-            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_DefaultApps_Click(object sender, RoutedEventArgs e)
         {
             // Launch the classic Default Programs panel
-            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.DefaultPrograms") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("control.exe", "/name Microsoft.DefaultPrograms") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
         private void Sidebar_Performance_Click(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); this.Hide(); } catch { }
+            try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
+        }
+
+        private async void Sidebar_Start_Click(object sender, RoutedEventArgs e)
+        {
+            HideDrawer();
+
+            // Give Windows a moment to shift focus after the drawer hides,
+            // otherwise the synthetic keystroke gets swallowed!
+            await Task.Delay(100);
+
+            // Use Ctrl + Esc, which is deeply hardcoded into Windows as a
+            // bulletproof way to summon the Start Menu
+            keybd_event(0x11, 0, 0, 0);       // VK_CONTROL Down
+            keybd_event(0x1B, 0, 0, 0);       // VK_ESCAPE Down
+            keybd_event(0x1B, 0, 0x0002, 0);  // VK_ESCAPE Up
+            keybd_event(0x11, 0, 0x0002, 0);  // VK_CONTROL Up
+        }
+
+        private void Sidebar_Power_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn && btn.ContextMenu != null)
+            {
+                btn.ContextMenu.PlacementTarget = btn;
+                btn.ContextMenu.IsOpen = true;
+            }
         }
 
         private void Sidebar_Power_Logout_Click(object sender, RoutedEventArgs e)
@@ -1467,6 +1991,7 @@ namespace MBRDeepDrawer
                 _coreLines = new System.Windows.Shapes.Polyline[coreCount];
                 _coreShades = new System.Windows.Shapes.Polygon[coreCount];
                 _coreTexts = new TextBlock[coreCount];
+                _coreTempTexts = new TextBlock[coreCount];
 
                 CpuCoresPanel.Children.Clear();
 
@@ -1481,8 +2006,11 @@ namespace MBRDeepDrawer
                     var headerPanel = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
                     headerPanel.Children.Add(new TextBlock { Text = $"Core {i}", Foreground = System.Windows.Media.Brushes.White, FontSize = 14, FontWeight = FontWeights.SemiBold });
                     var pctText = new TextBlock { Text = "0%", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#0078D7")), FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(10, 0, 0, 0) };
+                    var tempText = new TextBlock { Text = "-- °C", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#aaaaaa")), FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(15, 0, 0, 0) };
                     _coreTexts[i] = pctText;
+                    _coreTempTexts[i] = tempText;
                     headerPanel.Children.Add(pctText);
+                    headerPanel.Children.Add(tempText);
                     grid.Children.Add(headerPanel);
 
                     var canvas = new Canvas { Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true };
@@ -1819,6 +2347,23 @@ namespace MBRDeepDrawer
         public bool AdvCaseSensitive { get; set; }
         public string? AdvDrive { get; set; }
         public string? AdvFileType { get; set; }
+    }
+
+    public class TelemetryData
+    {
+        public float CpuTemp { get; set; }
+        public float GpuTemp { get; set; }
+        public System.Collections.Generic.Dictionary<int, float>? CoreTemps { get; set; }
+    }
+
+    public class AppSettings
+    {
+        public string ColorPalette { get; set; } = "MBR-Deep Dark";
+        public double BackgroundOpacity { get; set; } = 0.9;
+        public string TransitionEffect { get; set; } = "None";
+        public double AnimationSpeed { get; set; } = 0.5;
+        public double DrawerIconSize { get; set; } = 64.0;
+        public double SidebarIconSize { get; set; } = 72.0;
     }
 
     [ComImport]

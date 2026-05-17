@@ -241,3 +241,11 @@ C:\projects\MBR-Deep\src\BackendService\obj\Release\net10.0-windows\win-x64\refi
 C:\projects\MBR-Deep\src\BackendService\obj\Release\net10.0-windows\win-x64\MBR-DeepService.pdb
 C:\projects\MBR-Deep\src\BackendService\obj\Release\net10.0-windows\win-x64\MBR-DeepService.genruntimeconfig.cache
 C:\projects\MBR-Deep\src\BackendService\obj\Release\net10.0-windows\win-x64\ref\MBR-DeepService.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\HidSharp.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\LibreHardwareMonitorLib.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\Mono.Posix.NETStandard.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\System.CodeDom.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\System.IO.Ports.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\System.Management.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\MonoPosixHelper.dll
+C:\projects\MBR-Deep\src\BackendService\bin\Release\net10.0-windows\win-x64\libMonoPosixHelper.dll

@@ -54,3 +54,7 @@ if ($LASTEXITCODE -eq 0) {
 else {
     Write-Host "Build failed." -ForegroundColor Red
 }
+
+# Compile HLSL Shaders for WPF
+Write-Host "`nCompiling HLSL Shaders..." -ForegroundColor Cyan
+& ".\compile_shaders.ps1"

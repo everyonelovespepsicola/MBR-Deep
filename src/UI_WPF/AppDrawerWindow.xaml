@@ -498,7 +498,8 @@
         </Style>
     </Window.Resources>
 
-    <Grid Margin="50">
+    <Grid x:Name="RootGrid"
+          Margin="50">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -507,6 +508,17 @@
         <!-- Left Sidebar Navigation Strip -->
         <Grid Grid.Column="0"
               Margin="0,0,40,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <!-- Top flexible space -->
+                <RowDefinition Height="Auto"/>
+                <!-- Main Icons -->
+                <RowDefinition Height="*"/>
+                <!-- Bottom space (Start Button) -->
+                <RowDefinition Height="Auto"/>
+                <!-- Power Buttons -->
+            </Grid.RowDefinitions>
+
             <Grid.Resources>
                 <Style TargetType="Button">
                     <Setter Property="Background"
@@ -550,14 +562,15 @@
                 </Style>
             </Grid.Resources>
 
-            <StackPanel VerticalAlignment="Center"
+            <StackPanel Grid.Row="1"
+                        VerticalAlignment="Center"
                         DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
 
                 <Button ToolTip="This PC"
                         Click="Sidebar_Computer_Click">
                     <Image Source="{Binding IconThisPC}"
-                           Width="72"
-                           Height="72"
+                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Button.ContextMenu>
                         <ContextMenu>
@@ -576,8 +589,8 @@
                 <Button ToolTip="Control Panel"
                         Click="Sidebar_ControlPanel_Click">
                     <Image Source="{Binding IconControlPanel}"
-                           Width="72"
-                           Height="72"
+                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Button.ContextMenu>
                         <ContextMenu>
@@ -605,52 +618,82 @@
                 <Button ToolTip="Devices and Printers"
                         Click="Sidebar_Devices_Click">
                     <Image Source="{Binding IconDevices}"
-                           Width="72"
-                           Height="72"
+                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Button>
                 <Button ToolTip="Default Apps"
                         Click="Sidebar_DefaultApps_Click">
                     <Image Source="{Binding IconDefaultApps}"
-                           Width="72"
-                           Height="72"
+                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Button>
-                <Button ToolTip="Performance"
+                <Button ToolTip="Task Manager"
                         Click="Sidebar_Performance_Click">
                     <Image Source="{Binding IconPerformance}"
-                           Width="72"
-                           Height="72"
+                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Button>
             </StackPanel>
 
+            <!-- Ghosted Windows Start Button -->
+            <Button Grid.Row="2"
+                    ToolTip="Start Menu"
+                    Cursor="Hand"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Click="Sidebar_Start_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <!-- Tighter transparent border reduces the padding around the icon -->
+                        <Border Background="Transparent"
+                                Padding="10">
+                            <Path x:Name="GhostPath"
+                                  Data="M0,0 H10 V10 H0 Z M12,0 H22 V10 H12 Z M0,12 H10 V22 H0 Z M12,12 H22 V22 H12 Z"
+                                  Fill="White"
+                                  Opacity="0.1"
+                                  Stretch="Uniform"
+                                  Width="26"
+                                  Height="26"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+                                <Setter TargetName="GhostPath"
+                                        Property="Opacity"
+                                        Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
             <!-- Power Controls at Bottom Left -->
-            <StackPanel Orientation="Horizontal"
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Bottom"
                         Margin="0,0,0,-10">
-                <Button Content="&#xF3B1;"
-                        ToolTip="Log Out"
-                        Click="Sidebar_Power_Logout_Click"
-                        Width="45"
-                        Height="45"
-                        FontSize="20"
-                        Margin="0,0,10,0"/>
-                <Button Content="&#xE777;"
-                        ToolTip="Restart"
-                        Click="Sidebar_Power_Restart_Click"
-                        Width="45"
-                        Height="45"
-                        FontSize="20"
-                        Margin="0,0,10,0"/>
                 <Button Content="&#xE7E8;"
-                        ToolTip="Shut Down"
-                        Click="Sidebar_Power_Shutdown_Click"
+                        ToolTip="Power Options"
+                        Click="Sidebar_Power_Click"
                         Width="45"
                         Height="45"
                         FontSize="20"
-                        Margin="0"/>
+                        Margin="0">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Log Out"
+                                      Click="Sidebar_Power_Logout_Click"/>
+                            <MenuItem Header="Restart"
+                                      Click="Sidebar_Power_Restart_Click"/>
+                            <MenuItem Header="Shut Down"
+                                      Click="Sidebar_Power_Shutdown_Click"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
             </StackPanel>
         </Grid>
 
@@ -662,31 +705,68 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Mode Switcher Tabs -->
-            <StackPanel Grid.Row="0"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Center"
-                        Margin="0,0,0,15">
-                <RadioButton x:Name="TabApps"
-                             x:FieldModifier="public"
-                             Content="Apps"
-                             GroupName="ModeTabs"
-                             IsChecked="True"
-                             Style="{StaticResource TabRadioButtonStyle}"
-                             Checked="ModeTab_Changed"/>
-                <RadioButton x:Name="TabSettings"
-                             x:FieldModifier="public"
-                             Content="System-Tasks"
-                             GroupName="ModeTabs"
-                             Style="{StaticResource TabRadioButtonStyle}"
-                             Checked="ModeTab_Changed"/>
-                <RadioButton x:Name="TabPerf"
-                             x:FieldModifier="public"
-                             Content="Performance"
-                             GroupName="ModeTabs"
-                             Style="{StaticResource TabRadioButtonStyle}"
-                             Checked="ModeTab_Changed"/>
-            </StackPanel>
+            <!-- Mode Switcher Tabs & Settings Icon -->
+            <Grid Grid.Row="0"
+                  Margin="0,0,0,15">
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center">
+                    <RadioButton x:Name="TabApps"
+                                 x:FieldModifier="public"
+                                 Content="Apps"
+                                 GroupName="ModeTabs"
+                                 IsChecked="True"
+                                 Style="{StaticResource TabRadioButtonStyle}"
+                                 Checked="ModeTab_Changed"/>
+                    <RadioButton x:Name="TabSettings"
+                                 x:FieldModifier="public"
+                                 Content="System-Tasks"
+                                 GroupName="ModeTabs"
+                                 Style="{StaticResource TabRadioButtonStyle}"
+                                 Checked="ModeTab_Changed"/>
+                    <RadioButton x:Name="TabPerf"
+                                 x:FieldModifier="public"
+                                 Content="Performance"
+                                 GroupName="ModeTabs"
+                                 Style="{StaticResource TabRadioButtonStyle}"
+                                 Checked="ModeTab_Changed"/>
+                </StackPanel>
+
+                <!-- Settings Gear Icon -->
+                <Button x:Name="BtnOpenSettings"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        Foreground="#88FFFFFF"
+                        BorderThickness="0"
+                        Margin="0,0,20,0"
+                        Cursor="Hand"
+                        ToolTip="Settings"
+                        Click="BtnOpenSettings_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    CornerRadius="15"
+                                    Padding="5">
+                                <TextBlock Text="&#xE713;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="24"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="{TemplateBinding Foreground}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver"
+                                         Value="True">
+                                    <Setter Property="Foreground"
+                                            Value="White"/>
+                                    <Setter Property="Background"
+                                            Value="#33FFFFFF"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </Grid>
 
             <!-- WrapPanel to display files/apps as a grid of icons -->
             <ListBox x:Name="ResultsList"
@@ -791,8 +871,8 @@
                             </StackPanel.ContextMenu>
 
                             <Image Source="{Binding Icon}"
-                                   Width="64"
-                                   Height="64"
+                                   Width="{Binding DrawerIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                   Height="{Binding DrawerIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                                    Margin="0,0,0,10"/>
                             <TextBlock Text="{Binding DisplayName}"
                                        Foreground="White"
@@ -1179,6 +1259,12 @@
                                        FontSize="28"
                                        FontWeight="Bold"
                                        Margin="15,0,0,0"/>
+                            <TextBlock x:Name="CpuTempText"
+                                       Text="-- °C"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
                         </StackPanel>
                         <!-- The Canvas where we will draw our native graph -->
                         <Canvas x:Name="CpuCanvas"
@@ -1276,6 +1362,12 @@
                                        Margin="15,0,0,0"/>
                             <TextBlock x:Name="GpuDetailText"
                                        Text="0.0 GB"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
+                            <TextBlock x:Name="GpuTempText"
+                                       Text="-- °C"
                                        Foreground="#aaaaaa"
                                        FontSize="18"
                                        VerticalAlignment="Bottom"
@@ -1427,6 +1519,13 @@
                                FontSize="28"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center"/>
+                    <TextBlock x:Name="DetailedCpuTempText"
+                               Text="-- °C"
+                               Foreground="#aaaaaa"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               VerticalAlignment="Center"
+                               Margin="20,0,0,0"/>
                 </StackPanel>
                 <UniformGrid x:Name="CpuCoresPanel"
                              Grid.Row="1"
@@ -1590,6 +1689,15 @@
                                Foreground="White"
                                FontSize="18"
                                FontWeight="Bold"/>
+                    <TextBlock Text="Temp: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"
+                               Margin="30,0,0,0"/>
+                    <TextBlock x:Name="DetailedGpuTempText"
+                               Text="-- °C"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"/>
                 </StackPanel>
             </Grid>
 
@@ -1706,6 +1814,180 @@
                                FontSize="18"
                                FontWeight="Bold"/>
                 </StackPanel>
+            </Grid>
+
+            <!-- Settings Dashboard -->
+            <Grid x:Name="SettingsDashboardGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,20">
+                    <TextBlock Text="Settings"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"/>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel MaxWidth="800"
+                                HorizontalAlignment="Left"
+                                Margin="10,0,0,0">
+                        <!-- Appearance Section -->
+                        <TextBlock Text="Appearance"
+                                   Foreground="#0078D7"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,15"/>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Color Palette:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="SettingsColorPalette"
+                                      Grid.Column="1"
+                                      Width="200"
+                                      HorizontalAlignment="Left"
+                                      SelectionChanged="SettingsColorPalette_SelectionChanged">
+                                <ComboBoxItem Content="MBR-Deep Dark"
+                                              IsSelected="True"/>
+                                <ComboBoxItem Content="OLED Pitch Black"/>
+                                <ComboBoxItem Content="Crimson Red"/>
+                                <ComboBoxItem Content="Neon Green"/>
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Background Opacity:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsOpacitySlider"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="0.5"
+                                    Maximum="1.0"
+                                    Value="0.9"
+                                    TickFrequency="0.05"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsOpacitySlider_ValueChanged"/>
+                        </Grid>
+
+                        <!-- Animations Section -->
+                        <TextBlock Text="Animations"
+                                   Foreground="#0078D7"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Margin="0,20,0,15"/>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Transition Effect:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="SettingsEffect"
+                                      Grid.Column="1"
+                                      Width="200"
+                                      HorizontalAlignment="Left"
+                                      SelectionChanged="SettingsEffect_SelectionChanged">
+                                <ComboBoxItem Content="Genie"/>
+                                <ComboBoxItem Content="None"
+                                              IsSelected="True"/>
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Animation Speed:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsSpeedSlider"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="0.1"
+                                    Maximum="2.0"
+                                    Value="0.5"
+                                    TickFrequency="0.1"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsSpeedSlider_ValueChanged"/>
+                        </Grid>
+
+                        <!-- Layout & Scaling Section -->
+                        <TextBlock Text="Layout &amp; Scaling"
+                                   Foreground="#0078D7"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Margin="0,20,0,15"/>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Drawer Icon Size:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsDrawerIconSize"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="48"
+                                    Maximum="128"
+                                    Value="64"
+                                    TickFrequency="4"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsDrawerIconSize_ValueChanged"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Sidebar Icon Size:"
+                                       Foreground="#AAAAAA"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsSidebarIconSize"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="48"
+                                    Maximum="96"
+                                    Value="72"
+                                    TickFrequency="4"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsSidebarIconSize_ValueChanged"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
         </Grid>
     </Grid>

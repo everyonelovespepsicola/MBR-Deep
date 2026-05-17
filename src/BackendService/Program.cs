@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Win32.SafeHandles;
 using UglyToad.PdfPig;
+using LibreHardwareMonitor.Hardware;
 
 namespace MBRDeep.BackendService
 {
@@ -84,6 +85,93 @@ namespace MBRDeep.BackendService
             return false;
         }
 
+        private async Task TelemetryServerAsync(CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                NamedPipeServerStream? pipeServer = null;
+                Computer? computer = null;
+                try
+                {
+                    var pipeSecurity = new PipeSecurity();
+                    pipeSecurity.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User!, PipeAccessRights.FullControl, AccessControlType.Allow));
+                    pipeSecurity.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
+
+                    pipeServer = NamedPipeServerStreamAcl.Create("MBRDeepTelemetryPipe", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 4096, 4096, pipeSecurity);
+
+                    await pipeServer.WaitForConnectionAsync(stoppingToken);
+
+                    // UI Connected! Wake up the Ring-0 hardware driver
+                    computer = new Computer { IsCpuEnabled = true, IsGpuEnabled = true };
+                    computer.Open();
+
+                    using var writer = new StreamWriter(pipeServer, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                    while (pipeServer.IsConnected && !stoppingToken.IsCancellationRequested)
+                    {
+                        float cpuTemp = 0;
+                        float gpuTemp = 0;
+                        var coreTempsDict = new System.Collections.Generic.Dictionary<int, float>();
+
+                        foreach (var hardware in computer.Hardware)
+                        {
+                            hardware.Update();
+                            if (hardware.HardwareType == HardwareType.Cpu)
+                            {
+                                foreach (var sensor in hardware.Sensors)
+                                {
+                                    if (sensor.SensorType == SensorType.Temperature)
+                                    {
+                                        if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
+                                            sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase) ||
+                                            sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase) ||
+                                            sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            float val = sensor.Value ?? 0;
+                                            if (val > cpuTemp) cpuTemp = val; // Always grab the hottest temp reported
+
+                                            if (sensor.Name.StartsWith("Core #", StringComparison.OrdinalIgnoreCase) && int.TryParse(sensor.Name.Substring(6), out int coreNum))
+                                            {
+                                                coreTempsDict[coreNum - 1] = val;
+                                            }
+                                            else if (sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase) || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                if (!coreTempsDict.ContainsKey(0)) coreTempsDict[0] = val;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd)
+                            {
+                                foreach (var sensor in hardware.Sensors)
+                                {
+                                    if (sensor.SensorType == SensorType.Temperature)
+                                    {
+                                        float val = sensor.Value ?? 0;
+                                        if (val > gpuTemp) gpuTemp = val; // Grab the hottest GPU temp
+                                    }
+                                }
+                            }
+                        }
+
+                        var telemetry = new { CpuTemp = cpuTemp, GpuTemp = gpuTemp, CoreTemps = coreTempsDict };
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(telemetry).AsMemory(), stoppingToken);
+
+                        // Throttle to 1Hz
+                        await Task.Delay(1000, stoppingToken);
+                    }
+                }
+                catch (Exception) { /* If the UI closes or the pipe breaks, it throws here */ }
+                finally
+                {
+                    // Safely put the driver back to sleep (0.0% CPU) when the UI disconnects
+                    try { computer?.Close(); } catch { }
+                    pipeServer?.Dispose();
+                }
+            }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             Console.WriteLine("MBR-Deep Engine Service starting...");
@@ -119,6 +207,9 @@ namespace MBRDeep.BackendService
                 }
             }
             Console.ResetColor();
+
+            // Start the On-Demand Hardware Telemetry Server in the background
+            _ = TelemetryServerAsync(stoppingToken);
 
             Console.WriteLine("Waiting for UI Client to connect...");
 

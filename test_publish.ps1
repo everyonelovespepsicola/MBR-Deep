@@ -11,6 +11,11 @@ Set-Location $PSScriptRoot
 & ".\build.ps1"
 if ($LASTEXITCODE -ne 0) { Write-Host "C-Engine build failed!" -ForegroundColor Red; exit 1 }
 
+# Compile HLSL Shaders for WPF
+Write-Host "`n[1.5/5] Compiling HLSL Shaders..." -ForegroundColor Yellow
+& ".\compile_shaders.ps1"
+if ($LASTEXITCODE -ne 0) { Write-Host "Shader compilation failed!" -ForegroundColor Red; exit 1 }
+
 # 2. Publish Backend
 Write-Host "`n[2/5] Publishing Backend Service..." -ForegroundColor Yellow
 dotnet publish "$PSScriptRoot\src\BackendService\MBR-DeepService.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Backend"
