@@ -32,8 +32,9 @@ The project includes PowerShell automation scripts to make setup seamless.
 
 ### 1. New .NET 10 App Drawer & Background Service
 
-- **Frontend UI:** Use `.\build_AppDrawer.ps1` to build and launch the modern WPF App Drawer.
-- **Backend Service:** Run the `src/BackendService` project as an Administrator, or install it as a persistent Windows Service.
+- **Frontend UI:** Use `.\build_AppDrawer.ps1` to build and launch the modern WPF App Drawer (`MBR-DeepDrawer`).
+- **Backend Service:** Run the `src\BackendService\MBR-DeepService.csproj` project as an Administrator, or install it as a persistent Windows Service.
+- **Production Installer:** Run `.\publish.ps1` to compile the C-Engine, Backend Service, and Frontend UI, and bundle them into a single `MBRDeep_Setup.exe` installer.
 - **Stress Testing:** Run `.\test_publish.ps1` or `.\test_gm_publish.ps1` to execute the rigorous IPC stress and stability test suites.
 
 ### 2. Legacy Python App (Development)

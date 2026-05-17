@@ -13,11 +13,11 @@ if ($LASTEXITCODE -ne 0) { Write-Host "C-Engine build failed!" -ForegroundColor 
 
 # 2. Publish Backend
 Write-Host "`n[2/5] Publishing Backend Service..." -ForegroundColor Yellow
-dotnet publish "$PSScriptRoot\src\BackendService\BackendService.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Backend"
+dotnet publish "$PSScriptRoot\src\BackendService\MBR-DeepService.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Backend"
 
 # 3. Publish Frontend
 Write-Host "`n[3/5] Publishing App Drawer..." -ForegroundColor Yellow
-dotnet publish "$PSScriptRoot\src\UI_WPF\AppDrawerXAML.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Frontend"
+dotnet publish "$PSScriptRoot\src\UI_WPF\MBR-DeepDrawer.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Frontend"
 
 # Ensure the C-Engine DLL is explicitly copied to the UI folder so the global keyboard/mouse hooks function properly
 Copy-Item "$PSScriptRoot\src\Engine\fast_search.dll" "$payloadDir\Frontend\" -Force -ErrorAction SilentlyContinue
@@ -111,32 +111,35 @@ namespace MBRDeepInstaller
                 }
 
                 Console.WriteLine("Installing Background Service...");
-                string backendExe = Path.Combine(installDir, "Backend", "BackendService.exe");
+                string backendExe = Path.Combine(installDir, "Backend", "MBR-DeepService.exe");
                 Process.Start(new ProcessStartInfo("sc.exe", $"create MBRDeepService binPath= \"{backendExe}\" start= auto") { CreateNoWindow = true }).WaitForExit();
                 Process.Start(new ProcessStartInfo("sc.exe", "start MBRDeepService") { CreateNoWindow = true }).WaitForExit();
 
-                Console.WriteLine("Creating Start Menu Shortcut...");
+                Console.WriteLine("Creating Start Menu and Startup Shortcuts...");
                 string startMenu = Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
-                string target = Path.Combine(installDir, "Frontend", "AppDrawerXAML.exe");
-                string psCommand = $"-NoProfile -Command \"$wshell = New-Object -ComObject WScript.Shell; $s = $wshell.CreateShortcut('{Path.Combine(startMenu, "MBR-Deep.lnk")}'); $s.TargetPath = '{target}'; $s.Save()\"";
+                string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+                string target = Path.Combine(installDir, "Frontend", "MBR-DeepDrawer.exe");
+                string startMenuLnk = Path.Combine(startMenu, "MBR-Deep.lnk");
+                string startupLnk = Path.Combine(startupFolder, "MBR-Deep.lnk");
+                string psCommand = $"-NoProfile -Command \"$wshell = New-Object -ComObject WScript.Shell; $s = $wshell.CreateShortcut('{startMenuLnk}'); $s.TargetPath = '{target}'; $s.Save(); $s2 = $wshell.CreateShortcut('{startupLnk}'); $s2.TargetPath = '{target}'; $s2.Arguments = '-hidden'; $s2.Save()\"";
                 Process.Start(new ProcessStartInfo("powershell", psCommand) { CreateNoWindow = true }).WaitForExit();
 
                 Console.WriteLine("Registering Uninstaller...");
                 string uninstallBatPath = Path.Combine(installDir, "Uninstall.bat");
-                string startMenuLnk = Path.Combine(startMenu, "MBR-Deep.lnk");
                 string batContent = $@"@echo off
 echo MBR-Deep Uninstaller
 echo ====================
 echo Closing App Drawer...
-taskkill /F /IM AppDrawerXAML.exe >nul 2>&1
+taskkill /F /IM MBR-DeepDrawer.exe >nul 2>&1
 
 echo Stopping and removing Background Service...
 sc stop MBRDeepService >nul 2>&1
 sc delete MBRDeepService >nul 2>&1
 ping 127.0.0.1 -n 3 >nul
 
-echo Removing Start Menu Shortcut...
+echo Removing Shortcuts...
 del ""{startMenuLnk}"" >nul 2>&1
+del ""{startupLnk}"" >nul 2>&1
 
 echo Removing Registry Keys...
 reg delete ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MBR-Deep"" /f >nul 2>&1

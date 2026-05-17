@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { Write-Host "C-Engine build failed!" -ForegroundColor 
 
 # 2. Publish Backend
 Write-Host "`n[2/5] Publishing Backend Service..." -ForegroundColor Yellow
-dotnet publish "$PSScriptRoot\src\BackendService\BackendService.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Backend"
+dotnet publish "$PSScriptRoot\src\BackendService\MBR-DeepService.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$payloadDir\Backend"
 
 # 3. Create Stress Test Client
 Write-Host "`n[3/5] Building Stress Test Client..." -ForegroundColor Yellow
@@ -27,8 +27,8 @@ $csprojContent = @"
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Masquerade as AppDrawerXAML to pass the Backend Service security check -->
-    <AssemblyName>AppDrawerXAML</AssemblyName>
+    <!-- Masquerade as MBR-DeepDrawer to pass the Backend Service security check -->
+    <AssemblyName>MBR-DeepDrawer</AssemblyName>
   </PropertyGroup>
 </Project>
 "@
@@ -245,7 +245,7 @@ namespace TestInstaller
                 }
 
                 Console.WriteLine("Installing Background Service...");
-                string backendExe = Path.Combine(installDir, "Backend", "BackendService.exe");
+                string backendExe = Path.Combine(installDir, "Backend", "MBR-DeepService.exe");
                 Process.Start(new ProcessStartInfo("sc.exe", $"create MBRDeepService binPath= \"{backendExe}\" start= auto") { CreateNoWindow = true }).WaitForExit();
                 Process.Start(new ProcessStartInfo("sc.exe", "start MBRDeepService") { CreateNoWindow = true }).WaitForExit();
 
@@ -253,7 +253,7 @@ namespace TestInstaller
                 Thread.Sleep(10000);
 
                 Console.WriteLine("Launching Stress Test Client (Terminal will be visible for 60 seconds)...");
-                string clientExe = Path.Combine(installDir, "Client", "AppDrawerXAML.exe");
+                string clientExe = Path.Combine(installDir, "Client", "MBR-DeepDrawer.exe");
 
                 Process.Start(new ProcessStartInfo(clientExe) { UseShellExecute = true });
 

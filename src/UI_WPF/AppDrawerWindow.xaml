@@ -1,4 +1,4 @@
-<Window x:Class="AppDrawerXAML.AppDrawerWindow"
+<Window x:Class="MBRDeepDrawer.AppDrawerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="MBR-Deep Drawer"
@@ -65,7 +65,7 @@
         <!-- Dark Theme ContextMenu -->
         <Style TargetType="ContextMenu">
             <Setter Property="Background"
-                    Value="#2b2b2b"/>
+                    Value="#E61C1C1C"/>
             <Setter Property="Foreground"
                     Value="White"/>
             <Setter Property="BorderBrush"
@@ -385,7 +385,7 @@
                                       MinWidth="{TemplateBinding ActualWidth}"
                                       MaxHeight="{TemplateBinding MaxDropDownHeight}">
                                     <Border x:Name="DropDownBorder"
-                                            Background="#2b2b2b"
+                                            Background="#E61C1C1C"
                                             BorderBrush="#4a4a4a"
                                             BorderThickness="1"
                                             CornerRadius="8"
@@ -677,6 +677,12 @@
                 <RadioButton x:Name="TabSettings"
                              x:FieldModifier="public"
                              Content="System-Tasks"
+                             GroupName="ModeTabs"
+                             Style="{StaticResource TabRadioButtonStyle}"
+                             Checked="ModeTab_Changed"/>
+                <RadioButton x:Name="TabPerf"
+                             x:FieldModifier="public"
+                             Content="Performance"
                              GroupName="ModeTabs"
                              Style="{StaticResource TabRadioButtonStyle}"
                              Checked="ModeTab_Changed"/>
@@ -1127,6 +1133,579 @@
                         </StackPanel>
                     </Grid>
                 </Border>
+            </Grid>
+
+            <!-- Performance Dashboard -->
+            <Grid x:Name="PerformanceGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- CPU Tile -->
+                <Border Grid.Row="0"
+                        Grid.Column="0"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10"
+                        Cursor="Hand"
+                        ToolTip="Click for details"
+                        MouseLeftButtonUp="CpuTile_Click">
+                    <Grid Margin="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal"
+                                    Grid.Row="0">
+                            <TextBlock Text="CPU"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="CpuText"
+                                       Text="0%"
+                                       Foreground="#0078D7"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Margin="15,0,0,0"/>
+                        </StackPanel>
+                        <!-- The Canvas where we will draw our native graph -->
+                        <Canvas x:Name="CpuCanvas"
+                                Grid.Row="1"
+                                Margin="0,20,0,0"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="CpuShade"
+                                     Fill="#330078D7"/>
+                            <Polyline x:Name="CpuLine"
+                                      Stroke="#CC0078D7"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+
+                <!-- RAM Tile -->
+                <Border Grid.Row="0"
+                        Grid.Column="1"
+                        Grid.ColumnSpan="2"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10"
+                        Cursor="Hand"
+                        ToolTip="Click for details"
+                        MouseLeftButtonUp="RamTile_Click">
+                    <Grid Margin="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal"
+                                    Grid.Row="0">
+                            <TextBlock Text="Memory"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="RamText"
+                                       Text="0%"
+                                       Foreground="#55FF55"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Margin="15,0,0,0"/>
+                            <TextBlock x:Name="RamDetailText"
+                                       Text="0.0 / 0.0 GB"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
+                        </StackPanel>
+                        <!-- The Canvas where we will draw our native graph -->
+                        <Canvas x:Name="RamCanvas"
+                                Grid.Row="1"
+                                Margin="0,20,0,0"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="RamShade"
+                                     Fill="#3355FF55"/>
+                            <Polyline x:Name="RamLine"
+                                      Stroke="#CC55FF55"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+
+                <!-- GPU Tile -->
+                <Border Grid.Row="1"
+                        Grid.Column="0"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10"
+                        Cursor="Hand"
+                        ToolTip="Click for details"
+                        MouseLeftButtonUp="GpuTile_Click">
+                    <Grid Margin="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal"
+                                    Grid.Row="0">
+                            <TextBlock Text="GPU"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="GpuText"
+                                       Text="0%"
+                                       Foreground="#A200FF"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Margin="15,0,0,0"/>
+                            <TextBlock x:Name="GpuDetailText"
+                                       Text="0.0 GB"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
+                        </StackPanel>
+                        <Canvas x:Name="GpuCanvas"
+                                Grid.Row="1"
+                                Margin="0,20,0,0"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="GpuShade"
+                                     Fill="#33A200FF"/>
+                            <Polyline x:Name="GpuLine"
+                                      Stroke="#CCA200FF"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+
+                <!-- Disk Tile -->
+                <Border Grid.Row="1"
+                        Grid.Column="1"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10"
+                        Cursor="Hand"
+                        ToolTip="Click for details"
+                        MouseLeftButtonUp="DiskTile_Click">
+                    <Grid Margin="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal"
+                                    Grid.Row="0">
+                            <TextBlock Text="Disk"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="DiskText"
+                                       Text="0%"
+                                       Foreground="#D70078"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Margin="15,0,0,0"/>
+                            <TextBlock x:Name="DiskDetailText"
+                                       Text="R: 0 / W: 0 KB/s"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
+                        </StackPanel>
+                        <Canvas x:Name="DiskCanvas"
+                                Grid.Row="1"
+                                Margin="0,20,0,0"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="DiskShade"
+                                     Fill="#33D70078"/>
+                            <Polyline x:Name="DiskLine"
+                                      Stroke="#CCD70078"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+
+                <!-- Network Tile -->
+                <Border Grid.Row="1"
+                        Grid.Column="2"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10"
+                        Cursor="Hand"
+                        ToolTip="Click for details"
+                        MouseLeftButtonUp="NetTile_Click">
+                    <Grid Margin="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal"
+                                    Grid.Row="0">
+                            <TextBlock Text="Network"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="NetText"
+                                       Text="0 B/s"
+                                       Foreground="#D77800"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Margin="15,0,0,0"/>
+                            <TextBlock x:Name="NetDetailText"
+                                       Text="R: 0 / S: 0 B/s"
+                                       Foreground="#aaaaaa"
+                                       FontSize="18"
+                                       VerticalAlignment="Bottom"
+                                       Margin="15,0,0,4"/>
+                        </StackPanel>
+                        <Canvas x:Name="NetCanvas"
+                                Grid.Row="1"
+                                Margin="0,20,0,0"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="NetShade"
+                                     Fill="#33D77800"/>
+                            <Polyline x:Name="NetLine"
+                                      Stroke="#CCD77800"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Detailed CPU Dashboard -->
+            <Grid x:Name="DetailedCpuGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,10">
+                    <Button x:Name="DetailedCpuBackBtn"
+                            ToolTip="Back to Overview"
+                            Click="DetailedBackBtn_Click"
+                            Width="40"
+                            Height="40"
+                            Background="Transparent"
+                            Foreground="White"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,0,15,0">
+                        <TextBlock Text="&#xE72B;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="20"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Button>
+                    <TextBlock Text="Logical Processors"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <UniformGrid x:Name="CpuCoresPanel"
+                             Grid.Row="1"
+                             Margin="0,10,0,0"/>
+            </Grid>
+
+            <!-- Detailed RAM Dashboard -->
+            <Grid x:Name="DetailedRamGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,10">
+                    <Button ToolTip="Back to Overview"
+                            Click="DetailedBackBtn_Click"
+                            Width="40"
+                            Height="40"
+                            Background="Transparent"
+                            Foreground="White"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,0,15,0">
+                        <TextBlock Text="&#xE72B;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="20"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Button>
+                    <TextBlock Text="Memory"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border Grid.Row="1"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10">
+                    <Grid Margin="20">
+                        <Canvas x:Name="DetailedRamCanvas"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="DetailedRamShade"
+                                     Fill="#3355FF55"/>
+                            <Polyline x:Name="DetailedRamLine"
+                                      Stroke="#CC55FF55"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="In Use: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedRamUsed"
+                               Text="0.0 GB"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Margin="0,0,30,0"/>
+                    <TextBlock Text="Available: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedRamAvail"
+                               Text="0.0 GB"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Margin="0,0,30,0"/>
+                    <TextBlock Text="Total: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedRamTotal"
+                               Text="0.0 GB"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Detailed GPU Dashboard -->
+            <Grid x:Name="DetailedGpuGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,10">
+                    <Button ToolTip="Back to Overview"
+                            Click="DetailedBackBtn_Click"
+                            Width="40"
+                            Height="40"
+                            Background="Transparent"
+                            Foreground="White"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,0,15,0">
+                        <TextBlock Text="&#xE72B;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="20"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Button>
+                    <TextBlock Text="GPU"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border Grid.Row="1"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10">
+                    <Grid Margin="20">
+                        <Canvas x:Name="DetailedGpuCanvas"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="DetailedGpuShade"
+                                     Fill="#33A200FF"/>
+                            <Polyline x:Name="DetailedGpuLine"
+                                      Stroke="#CCA200FF"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="Utilization: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedGpuUtil"
+                               Text="0%"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Margin="0,0,30,0"/>
+                    <TextBlock Text="Dedicated Memory: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedGpuMem"
+                               Text="0.0 GB"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Detailed Disk Dashboard -->
+            <Grid x:Name="DetailedDiskGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,10">
+                    <Button ToolTip="Back to Overview"
+                            Click="DetailedBackBtn_Click"
+                            Width="40"
+                            Height="40"
+                            Background="Transparent"
+                            Foreground="White"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,0,15,0">
+                        <TextBlock Text="&#xE72B;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="20"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Button>
+                    <TextBlock Text="Disk"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <UniformGrid x:Name="DetailedDiskPanel"
+                             Grid.Row="1"
+                             Margin="0,10,0,0"/>
+            </Grid>
+
+            <!-- Detailed Network Dashboard -->
+            <Grid x:Name="DetailedNetGrid"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed"
+                  Margin="15">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal"
+                            Margin="10,0,0,10">
+                    <Button ToolTip="Back to Overview"
+                            Click="DetailedBackBtn_Click"
+                            Width="40"
+                            Height="40"
+                            Background="Transparent"
+                            Foreground="White"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,0,15,0">
+                        <TextBlock Text="&#xE72B;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="20"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Button>
+                    <TextBlock Text="Network"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border Grid.Row="1"
+                        Background="Transparent"
+                        BorderBrush="#4a4a4a"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Margin="10">
+                    <Grid Margin="20">
+                        <Canvas x:Name="DetailedNetCanvas"
+                                ClipToBounds="True"
+                                SizeChanged="Canvas_SizeChanged">
+                            <Polygon x:Name="DetailedNetShade"
+                                     Fill="#33D77800"/>
+                            <Polyline x:Name="DetailedNetLine"
+                                      Stroke="#CCD77800"
+                                      StrokeThickness="2"/>
+                        </Canvas>
+                    </Grid>
+                </Border>
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="Send: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedNetSend"
+                               Text="0 B/s"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Margin="0,0,30,0"/>
+                    <TextBlock Text="Receive: "
+                               Foreground="#aaaaaa"
+                               FontSize="18"/>
+                    <TextBlock x:Name="DetailedNetRecv"
+                               Text="0 B/s"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"/>
+                </StackPanel>
             </Grid>
         </Grid>
     </Grid>

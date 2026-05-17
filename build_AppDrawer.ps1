@@ -1,7 +1,7 @@
 Write-Host "Setting up MBR-Deep App Drawer Build..." -ForegroundColor Cyan
 
 $wpfDir = "src\UI_WPF"
-$projectName = "AppDrawerXAML"
+$projectName = "MBR-DeepDrawer"
 $csprojPath = Join-Path $wpfDir "$projectName.csproj"
 $appXamlPath = Join-Path $wpfDir "App.xaml"
 $appXamlCsPath = Join-Path $wpfDir "App.xaml.cs"
@@ -14,6 +14,7 @@ if (-not (Test-Path $csprojPath)) {
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>MBRDeepDrawer</RootNamespace>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -37,7 +38,7 @@ if (-not (Test-Path $csprojPath)) {
 if (-not (Test-Path $appXamlPath)) {
   Write-Host " -> Creating App.xaml (WPF Entry Point)..." -ForegroundColor Green
   @"
-<Application x:Class="AppDrawerXAML.App"
+<Application x:Class="MBRDeepDrawer.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="AppDrawerWindow.xaml">
@@ -48,7 +49,7 @@ if (-not (Test-Path $appXamlPath)) {
 
   @"
 using System.Windows;
-namespace AppDrawerXAML { public partial class App : System.Windows.Application { } }
+namespace MBRDeepDrawer { public partial class App : System.Windows.Application { } }
 "@ | Out-File -FilePath $appXamlCsPath -Encoding ascii
 }
 

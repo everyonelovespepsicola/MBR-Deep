@@ -17,7 +17,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace AppDrawerXAML
+namespace MBRDeepDrawer
 {
     public partial class AppDrawerWindow : Window
     {
@@ -103,6 +103,35 @@ namespace AppDrawerXAML
         private Dictionary<string, int> _appOpenCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private string _recentsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "recents.json");
 
+        // --- Performance Dashboard State ---
+        private System.Windows.Threading.DispatcherTimer? _perfTimer;
+        private double[] _cpuHistory = new double[60];
+        private double[] _ramHistory = new double[60];
+        private double[] _gpuHistory = new double[60];
+        private double[] _diskHistory = new double[60];
+        private double[] _netHistory = new double[60];
+        private int _historyIndex = 0;
+
+        // --- Detailed Performance Dashboard State ---
+        private bool _isDetailedCpuView = false;
+        private bool _isDetailedRamView = false;
+        private bool _isDetailedGpuView = false;
+        private bool _isDetailedDiskView = false;
+        private bool _isDetailedNetView = false;
+        private double[][]? _coreHistory;
+        private Canvas[]? _coreCanvases;
+        private System.Windows.Shapes.Polyline[]? _coreLines;
+        private System.Windows.Shapes.Polygon[]? _coreShades;
+        private TextBlock[]? _coreTexts;
+
+        private double[][]? _detailedDiskHistory;
+        private Canvas[]? _detailedDiskCanvases;
+        private System.Windows.Shapes.Polyline[]? _detailedDiskLines;
+        private System.Windows.Shapes.Polygon[]? _detailedDiskShades;
+        private TextBlock[]? _detailedDiskActiveTexts;
+        private TextBlock[]? _detailedDiskReadTexts;
+        private TextBlock[]? _detailedDiskWriteTexts;
+
         private string currentSearchTerm = "";
         private CancellationTokenSource? _searchCts;
 
@@ -126,6 +155,12 @@ namespace AppDrawerXAML
             LoadSidebarIcons();
             SearchResults = new ObservableCollection<SearchResult>();
 
+            _perfTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(1000)
+            };
+            _perfTimer.Tick += PerfTimer_Tick;
+
             // Set up CollectionViewSource for Grouping
             var cvs = new CollectionViewSource { Source = SearchResults };
             cvs.GroupDescriptions.Add(new PropertyGroupDescription("Category"));
@@ -138,6 +173,13 @@ namespace AppDrawerXAML
 
             // Load God Mode items in the background
             _ = Task.Run(() => LoadGodModeItems());
+
+            // Pre-load performance counters in the background so the Performance tab opens instantly
+            _ = Task.Run(() =>
+            {
+                NativeMonitor.InitializeExtraCounters();
+                NativeMonitor.GetGpuUsageAndMemory();
+            });
 
             // Size the window to fill the screen but respect the taskbar
             this.Width = SystemParameters.WorkArea.Width;
@@ -186,11 +228,26 @@ namespace AppDrawerXAML
             {
                 if (this.IsVisible)
                 {
-                    SearchBox.Focus();
-                    SearchBox.SelectAll();
+                    if (TabPerf.IsChecked == true)
+                    {
+                        // Re-establish baselines so we don't average out hardware rates over the time the drawer was hidden
+                        NativeMonitor.GetCpuUsage();
+                        NativeMonitor.GetDiskUsage();
+                        NativeMonitor.GetNetworkUsage();
+                        NativeMonitor.GetGpuUsageAndMemory();
+                        if (_isDetailedCpuView) NativeMonitor.GetCoreUsages();
+                        _perfTimer?.Start();
+                    }
+                    else
+                    {
+                        SearchBox.Focus();
+                        SearchBox.SelectAll();
+                    }
                 }
                 else
                 {
+                    _perfTimer?.Stop();
+
                     // Reset the UI cleanly when the window is hidden
                     SearchBox.Text = "";
 
@@ -219,16 +276,10 @@ namespace AppDrawerXAML
                         AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
                     }
 
-                    AdvancedPanel.Visibility = Visibility.Collapsed;
-                    BasicSearchPanel.Visibility = Visibility.Visible;
-
-                    if (TabSettings.IsChecked == true)
+                    if (TabPerf.IsChecked != true)
                     {
-                        SortMode_Changed(this, new RoutedEventArgs());
-                    }
-                    else
-                    {
-                        ShowDefaultApps();
+                        AdvancedPanel.Visibility = Visibility.Collapsed;
+                        BasicSearchPanel.Visibility = Visibility.Visible;
                     }
                 }
             };
@@ -307,6 +358,13 @@ namespace AppDrawerXAML
 
             // Register Alt + Space as a global hotkey
             RegisterHotKey(_windowHandle, HOTKEY_ID, MOD_ALT, VK_SPACE);
+
+            // Hide window immediately if launched via Startup folder shortcut
+            string[] args = Environment.GetCommandLineArgs();
+            if (args.Contains("-hidden", StringComparer.OrdinalIgnoreCase))
+            {
+                this.Hide();
+            }
         }
 
         private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -738,18 +796,49 @@ namespace AppDrawerXAML
         {
             if (!this.IsLoaded) return;
 
-            SearchBox.Clear();
-            SearchBox.Focus();
-
-            if (TabSettings.IsChecked == true)
+            if (TabPerf.IsChecked == true)
             {
-                SortMode_Changed(sender, e);
-                BtnAdvanced.Visibility = Visibility.Collapsed;
+                ResultsList.Visibility = Visibility.Collapsed;
+                BasicSearchPanel.Visibility = Visibility.Collapsed;
+                AdvancedPanel.Visibility = Visibility.Collapsed;
+
+                if (_isDetailedCpuView) DetailedCpuGrid.Visibility = Visibility.Visible;
+                else if (_isDetailedRamView) DetailedRamGrid.Visibility = Visibility.Visible;
+                else if (_isDetailedGpuView) DetailedGpuGrid.Visibility = Visibility.Visible;
+                else if (_isDetailedDiskView) DetailedDiskGrid.Visibility = Visibility.Visible;
+                else if (_isDetailedNetView) DetailedNetGrid.Visibility = Visibility.Visible;
+                else PerformanceGrid.Visibility = Visibility.Visible;
+
+                NativeMonitor.GetCpuUsage();
+                NativeMonitor.InitializeExtraCounters();
+                _perfTimer?.Start();
             }
             else
             {
-                BtnAdvanced.Visibility = Visibility.Visible;
-                _ = LoadDefaultAppDrawerAsync();
+                PerformanceGrid.Visibility = Visibility.Collapsed;
+                DetailedCpuGrid.Visibility = Visibility.Collapsed;
+                DetailedRamGrid.Visibility = Visibility.Collapsed;
+                DetailedGpuGrid.Visibility = Visibility.Collapsed;
+                DetailedDiskGrid.Visibility = Visibility.Collapsed;
+                DetailedNetGrid.Visibility = Visibility.Collapsed;
+                _perfTimer?.Stop();
+
+                ResultsList.Visibility = Visibility.Visible;
+                BasicSearchPanel.Visibility = Visibility.Visible;
+
+                SearchBox.Clear();
+                SearchBox.Focus();
+
+                if (TabSettings.IsChecked == true)
+                {
+                    SortMode_Changed(sender, e);
+                    BtnAdvanced.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    BtnAdvanced.Visibility = Visibility.Visible;
+                    _ = LoadDefaultAppDrawerAsync();
+                }
             }
         }
 
@@ -1360,6 +1449,349 @@ namespace AppDrawerXAML
         private void Sidebar_Power_Shutdown_Click(object sender, RoutedEventArgs e)
         {
             try { Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 0") { UseShellExecute = true }); } catch { }
+        }
+
+        private void CpuTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedCpuGrid.Visibility = Visibility.Visible;
+            _isDetailedCpuView = true;
+
+            NativeMonitor.GetCoreUsages(); // Initialize baseline to guarantee an accurate first read
+
+            int coreCount = Environment.ProcessorCount;
+            if (_coreHistory == null)
+            {
+                _coreHistory = new double[coreCount][];
+                _coreCanvases = new Canvas[coreCount];
+                _coreLines = new System.Windows.Shapes.Polyline[coreCount];
+                _coreShades = new System.Windows.Shapes.Polygon[coreCount];
+                _coreTexts = new TextBlock[coreCount];
+
+                CpuCoresPanel.Children.Clear();
+
+                for (int i = 0; i < coreCount; i++)
+                {
+                    _coreHistory[i] = new double[60];
+                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#4a4a4a")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    var grid = new Grid { Margin = new Thickness(10) };
+                    grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                    grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                    var headerPanel = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+                    headerPanel.Children.Add(new TextBlock { Text = $"Core {i}", Foreground = System.Windows.Media.Brushes.White, FontSize = 14, FontWeight = FontWeights.SemiBold });
+                    var pctText = new TextBlock { Text = "0%", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#0078D7")), FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(10, 0, 0, 0) };
+                    _coreTexts[i] = pctText;
+                    headerPanel.Children.Add(pctText);
+                    grid.Children.Add(headerPanel);
+
+                    var canvas = new Canvas { Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true };
+                    Grid.SetRow(canvas, 1);
+                    _coreCanvases[i] = canvas;
+
+                    var shade = new System.Windows.Shapes.Polygon { Fill = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#330078D7")) };
+                    _coreShades[i] = shade;
+                    canvas.Children.Add(shade);
+                    var line = new System.Windows.Shapes.Polyline { Stroke = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#CC0078D7")), StrokeThickness = 1 };
+                    _coreLines[i] = line;
+                    canvas.Children.Add(line);
+                    grid.Children.Add(canvas);
+                    border.Child = grid;
+                    int index = i;
+                    canvas.SizeChanged += (s, ev) => { if (_isDetailedCpuView) DrawGraph(canvas, line, shade, _coreHistory[index], _historyIndex); };
+                    CpuCoresPanel.Children.Add(border);
+                }
+            }
+        }
+
+        private void RamTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedRamGrid.Visibility = Visibility.Visible;
+            _isDetailedRamView = true;
+        }
+
+        private void GpuTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedGpuGrid.Visibility = Visibility.Visible;
+            _isDetailedGpuView = true;
+        }
+
+        private void DiskTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedDiskGrid.Visibility = Visibility.Visible;
+            _isDetailedDiskView = true;
+
+            var disks = NativeMonitor.GetDetailedDiskUsages();
+            int diskCount = disks.Length;
+
+            if (_detailedDiskHistory == null || _detailedDiskHistory.Length != diskCount)
+            {
+                _detailedDiskHistory = new double[diskCount][];
+                _detailedDiskCanvases = new Canvas[diskCount];
+                _detailedDiskLines = new System.Windows.Shapes.Polyline[diskCount];
+                _detailedDiskShades = new System.Windows.Shapes.Polygon[diskCount];
+                _detailedDiskActiveTexts = new TextBlock[diskCount];
+                _detailedDiskReadTexts = new TextBlock[diskCount];
+                _detailedDiskWriteTexts = new TextBlock[diskCount];
+
+                DetailedDiskPanel.Children.Clear();
+
+                for (int i = 0; i < diskCount; i++)
+                {
+                    _detailedDiskHistory[i] = new double[60];
+                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#4a4a4a")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    var grid = new Grid { Margin = new Thickness(10) };
+                    grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                    grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                    var headerPanel = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+                    headerPanel.Children.Add(new TextBlock { Text = disks[i].Name, Foreground = System.Windows.Media.Brushes.White, FontSize = 16, FontWeight = FontWeights.SemiBold });
+
+                    var activeText = new TextBlock { Text = "0%", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#D70078")), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(15, 0, 0, 0) };
+                    _detailedDiskActiveTexts[i] = activeText;
+                    headerPanel.Children.Add(activeText);
+                    grid.Children.Add(headerPanel);
+
+                    var canvas = new Canvas { Margin = new Thickness(0, 10, 0, 10), ClipToBounds = true };
+                    Grid.SetRow(canvas, 1);
+                    _detailedDiskCanvases[i] = canvas;
+
+                    var shade = new System.Windows.Shapes.Polygon { Fill = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#33D70078")) };
+                    _detailedDiskShades[i] = shade;
+                    canvas.Children.Add(shade);
+                    var line = new System.Windows.Shapes.Polyline { Stroke = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#CCD70078")), StrokeThickness = 1 };
+                    _detailedDiskLines[i] = line;
+                    canvas.Children.Add(line);
+                    grid.Children.Add(canvas);
+
+                    var footerPanel = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Center };
+                    var readText = new TextBlock { Text = "R: 0 KB/s", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#aaaaaa")), FontSize = 14, Margin = new Thickness(0, 0, 15, 0) };
+                    var writeText = new TextBlock { Text = "W: 0 KB/s", Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#aaaaaa")), FontSize = 14 };
+                    _detailedDiskReadTexts[i] = readText;
+                    _detailedDiskWriteTexts[i] = writeText;
+                    footerPanel.Children.Add(readText);
+                    footerPanel.Children.Add(writeText);
+                    Grid.SetRow(footerPanel, 2);
+                    grid.Children.Add(footerPanel);
+
+                    border.Child = grid;
+                    int index = i;
+                    canvas.SizeChanged += (s, ev) => { if (_isDetailedDiskView) DrawGraph(canvas, line, shade, _detailedDiskHistory[index], _historyIndex); };
+                    DetailedDiskPanel.Children.Add(border);
+                }
+            }
+        }
+
+        private void NetTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            PerformanceGrid.Visibility = Visibility.Collapsed;
+            DetailedNetGrid.Visibility = Visibility.Visible;
+            _isDetailedNetView = true;
+        }
+
+        private void DetailedBackBtn_Click(object sender, RoutedEventArgs e)
+        {
+            DetailedCpuGrid.Visibility = Visibility.Collapsed;
+            DetailedRamGrid.Visibility = Visibility.Collapsed;
+            DetailedGpuGrid.Visibility = Visibility.Collapsed;
+            DetailedDiskGrid.Visibility = Visibility.Collapsed;
+            DetailedNetGrid.Visibility = Visibility.Collapsed;
+            PerformanceGrid.Visibility = Visibility.Visible;
+            _isDetailedCpuView = false;
+            _isDetailedRamView = false;
+            _isDetailedGpuView = false;
+            _isDetailedDiskView = false;
+            _isDetailedNetView = false;
+        }
+
+        // --- Performance Drawing Logic ---
+        private void PerfTimer_Tick(object? sender, EventArgs e)
+        {
+            if (PerformanceGrid.Visibility != Visibility.Visible &&
+                DetailedCpuGrid.Visibility != Visibility.Visible &&
+                DetailedRamGrid.Visibility != Visibility.Visible &&
+                DetailedGpuGrid.Visibility != Visibility.Visible &&
+                DetailedDiskGrid.Visibility != Visibility.Visible &&
+                DetailedNetGrid.Visibility != Visibility.Visible)
+            {
+                _perfTimer?.Stop();
+                return;
+            }
+
+            double cpu = NativeMonitor.GetCpuUsage();
+            var ram = NativeMonitor.GetMemoryUsage();
+            var gpu = NativeMonitor.GetGpuUsageAndMemory();
+            var disk = NativeMonitor.GetDiskUsage();
+            var net = NativeMonitor.GetNetworkUsage();
+
+            _cpuHistory[_historyIndex] = cpu;
+            _ramHistory[_historyIndex] = ram.Percentage;
+            _gpuHistory[_historyIndex] = gpu.Percentage;
+            _diskHistory[_historyIndex] = disk.Percentage;
+
+            // Scale network dynamically (1MB/s minimum top bounds)
+            double totalNetBps = net.RecvBps + net.SentBps;
+            _netHistory[_historyIndex] = totalNetBps;
+
+            double maxNet = 1024 * 1024;
+            foreach (var val in _netHistory) { if (val > maxNet) maxNet = val; }
+            double[] scaledNet = new double[60];
+            for (int i = 0; i < 60; i++) scaledNet[i] = (_netHistory[i] / maxNet) * 100.0;
+
+            if (_isDetailedCpuView && _coreHistory != null && _coreTexts != null)
+            {
+                var coreUsages = NativeMonitor.GetCoreUsages();
+                int currentIndex = _historyIndex;
+                for (int i = 0; i < coreUsages.Length && i < _coreHistory.Length; i++)
+                {
+                    _coreHistory[i][currentIndex] = coreUsages[i];
+                    _coreTexts[i].Text = $"{coreUsages[i]:F0}%";
+                }
+            }
+
+            if (_isDetailedDiskView && _detailedDiskHistory != null && _detailedDiskActiveTexts != null && _detailedDiskReadTexts != null && _detailedDiskWriteTexts != null)
+            {
+                var detailedDisks = NativeMonitor.GetDetailedDiskUsages();
+                int currentIndex = _historyIndex;
+                for (int i = 0; i < detailedDisks.Length && i < _detailedDiskHistory.Length; i++)
+                {
+                    _detailedDiskHistory[i][currentIndex] = detailedDisks[i].Percentage;
+                    _detailedDiskActiveTexts[i].Text = $"{detailedDisks[i].Percentage:F0}%";
+                    _detailedDiskReadTexts[i].Text = $"R: {FormatBytes(detailedDisks[i].ReadBps)}";
+                    _detailedDiskWriteTexts[i].Text = $"W: {FormatBytes(detailedDisks[i].WriteBps)}";
+                }
+            }
+
+            _historyIndex = (_historyIndex + 1) % 60;
+
+            CpuText.Text = $"{cpu:F0}%";
+            RamText.Text = $"{ram.Percentage:F0}%";
+            RamDetailText.Text = $"{ram.UsedGB:F1} / {ram.TotalGB:F1} GB";
+
+            GpuText.Text = $"{gpu.Percentage:F0}%";
+            GpuDetailText.Text = $"{gpu.MemoryGB:F1} GB";
+
+            DiskText.Text = $"{disk.Percentage:F0}%";
+            DiskDetailText.Text = $"R: {FormatBytes(disk.ReadBps)} / W: {FormatBytes(disk.WriteBps)}";
+
+            NetText.Text = FormatBytes(totalNetBps);
+            NetDetailText.Text = $"R: {FormatBytes(net.RecvBps)} / S: {FormatBytes(net.SentBps)}";
+
+            DrawGraph(CpuCanvas, CpuLine, CpuShade, _cpuHistory, _historyIndex);
+            DrawGraph(RamCanvas, RamLine, RamShade, _ramHistory, _historyIndex);
+            DrawGraph(GpuCanvas, GpuLine, GpuShade, _gpuHistory, _historyIndex);
+            DrawGraph(DiskCanvas, DiskLine, DiskShade, _diskHistory, _historyIndex);
+            DrawGraph(NetCanvas, NetLine, NetShade, scaledNet, _historyIndex);
+
+            if (_isDetailedCpuView && _coreHistory != null && _coreCanvases != null && _coreLines != null && _coreShades != null)
+            {
+                for (int i = 0; i < _coreHistory.Length; i++)
+                {
+                    DrawGraph(_coreCanvases[i], _coreLines[i], _coreShades[i], _coreHistory[i], _historyIndex);
+                }
+            }
+
+            if (_isDetailedDiskView && _detailedDiskHistory != null && _detailedDiskCanvases != null && _detailedDiskLines != null && _detailedDiskShades != null)
+            {
+                for (int i = 0; i < _detailedDiskHistory.Length; i++)
+                {
+                    DrawGraph(_detailedDiskCanvases[i], _detailedDiskLines[i], _detailedDiskShades[i], _detailedDiskHistory[i], _historyIndex);
+                }
+            }
+
+            if (DetailedRamGrid.Visibility == Visibility.Visible)
+            {
+                DetailedRamUsed.Text = $"{ram.UsedGB:F1} GB";
+                DetailedRamAvail.Text = $"{(ram.TotalGB - ram.UsedGB):F1} GB";
+                DetailedRamTotal.Text = $"{ram.TotalGB:F1} GB";
+                DrawGraph(DetailedRamCanvas, DetailedRamLine, DetailedRamShade, _ramHistory, _historyIndex);
+            }
+
+            if (DetailedGpuGrid.Visibility == Visibility.Visible)
+            {
+                DetailedGpuUtil.Text = $"{gpu.Percentage:F0}%";
+                DetailedGpuMem.Text = $"{gpu.MemoryGB:F1} GB";
+                DrawGraph(DetailedGpuCanvas, DetailedGpuLine, DetailedGpuShade, _gpuHistory, _historyIndex);
+            }
+
+            if (DetailedNetGrid.Visibility == Visibility.Visible)
+            {
+                DetailedNetSend.Text = FormatBytes(net.SentBps);
+                DetailedNetRecv.Text = FormatBytes(net.RecvBps);
+                DrawGraph(DetailedNetCanvas, DetailedNetLine, DetailedNetShade, scaledNet, _historyIndex);
+            }
+        }
+
+        private string FormatBytes(double bytes)
+        {
+            if (bytes >= 1024 * 1024 * 1024) return $"{bytes / (1024 * 1024 * 1024):F1} GB/s";
+            if (bytes >= 1024 * 1024) return $"{bytes / (1024 * 1024):F1} MB/s";
+            if (bytes >= 1024) return $"{bytes / 1024:F1} KB/s";
+            return $"{bytes:F0} B/s";
+        }
+
+        private void DrawGraph(Canvas canvas, System.Windows.Shapes.Polyline line, System.Windows.Shapes.Polygon shade, double[] history, int headIndex)
+        {
+            if (canvas.ActualWidth == 0 || canvas.ActualHeight == 0) return;
+
+            double width = canvas.ActualWidth;
+            double height = canvas.ActualHeight;
+
+            // Re-use collections to prevent Garbage Collection (GC) pressure and memory inflation
+            var points = line.Points;
+            if (points.Count != 60)
+            {
+                points.Clear();
+                for (int i = 0; i < 60; i++) points.Add(new System.Windows.Point(0, height));
+            }
+
+            var shadePoints = shade.Points;
+            if (shadePoints.Count != 62)
+            {
+                shadePoints.Clear();
+                for (int i = 0; i < 62; i++) shadePoints.Add(new System.Windows.Point(0, height));
+            }
+
+            for (int i = 0; i < 60; i++)
+            {
+                int idx = (headIndex + i) % 60;
+                double val = history[idx];
+
+                double x = (width / 59.0) * i;
+                double y = height - ((val / 100.0) * height);
+
+                var pt = new System.Windows.Point(x, y);
+                points[i] = pt;
+                shadePoints[i] = pt;
+            }
+
+            shadePoints[60] = new System.Windows.Point(width, height);
+            shadePoints[61] = new System.Windows.Point(0, height);
+        }
+
+        private void Canvas_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            double maxNet = 1024 * 1024;
+            foreach (var val in _netHistory) { if (val > maxNet) maxNet = val; }
+            double[] scaledNet = new double[60];
+            for (int i = 0; i < 60; i++) scaledNet[i] = (_netHistory[i] / maxNet) * 100.0;
+
+            if (PerformanceGrid.Visibility == Visibility.Visible)
+            {
+                DrawGraph(CpuCanvas, CpuLine, CpuShade, _cpuHistory, _historyIndex);
+                DrawGraph(RamCanvas, RamLine, RamShade, _ramHistory, _historyIndex);
+                DrawGraph(GpuCanvas, GpuLine, GpuShade, _gpuHistory, _historyIndex);
+                DrawGraph(DiskCanvas, DiskLine, DiskShade, _diskHistory, _historyIndex);
+                DrawGraph(NetCanvas, NetLine, NetShade, scaledNet, _historyIndex);
+            }
+
+            if (DetailedRamGrid.Visibility == Visibility.Visible) DrawGraph(DetailedRamCanvas, DetailedRamLine, DetailedRamShade, _ramHistory, _historyIndex);
+            if (DetailedGpuGrid.Visibility == Visibility.Visible) DrawGraph(DetailedGpuCanvas, DetailedGpuLine, DetailedGpuShade, _gpuHistory, _historyIndex);
+            if (DetailedNetGrid.Visibility == Visibility.Visible) DrawGraph(DetailedNetCanvas, DetailedNetLine, DetailedNetShade, scaledNet, _historyIndex);
         }
     }
 
