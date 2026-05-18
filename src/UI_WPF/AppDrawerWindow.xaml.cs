@@ -211,6 +211,7 @@ namespace MBRDeepDrawer
         // Flag to determine if we are actually quitting the app
         private bool _isExplicitExit = false;
         private DateTime _lastDeactivated;
+        private DateTime _lastToggle = DateTime.MinValue;
         private bool _isAdvSearching = false;
 
         public ImageSource? IconThisPC { get; set; }
@@ -459,6 +460,8 @@ namespace MBRDeepDrawer
         public AppDrawerWindow()
         {
             InitializeComponent();
+            AlignUIElements();
+            SetupDarkContextMenus();
             LoadSidebarIcons();
             SearchResults = new ObservableCollection<SearchResult>();
 
@@ -497,6 +500,38 @@ namespace MBRDeepDrawer
             var cvs = new CollectionViewSource { Source = SearchResults };
             cvs.GroupDescriptions.Add(new PropertyGroupDescription("Category"));
             ResultsList.ItemsSource = cvs.View;
+
+            // Populate Drive RadioButtons
+            var rbAll = new System.Windows.Controls.RadioButton
+            {
+                Content = "All",
+                GroupName = "AdvDriveGroup",
+                IsChecked = true,
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 15, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            rbAll.Checked += AdvDrive_Checked;
+            AdvDrivePanel.Children.Add(rbAll);
+
+            foreach (var drive in System.IO.DriveInfo.GetDrives())
+            {
+                if (drive.IsReady)
+                {
+                    var rb = new System.Windows.Controls.RadioButton
+                    {
+                        Content = drive.Name.Substring(0, 1),
+                        GroupName = "AdvDriveGroup",
+                        FontSize = 16,
+                        Margin = new Thickness(0, 0, 15, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        VerticalContentAlignment = VerticalAlignment.Center
+                    };
+                    rb.Checked += AdvDrive_Checked;
+                    AdvDrivePanel.Children.Add(rb);
+                }
+            }
 
             LoadRecents();
             LoadSettings();
@@ -592,29 +627,12 @@ namespace MBRDeepDrawer
                     // Reset the UI cleanly when the window is hidden
                     SearchBox.Text = "";
 
-                    AdvName1.Text = "";
-                    AdvName2.Text = "";
-                    AdvContent1.Text = "";
-                    AdvContent2.Text = "";
-                    AdvLocation.Text = "";
-                    AdvFileType.SelectedIndex = 0;
-                    AdvCaseSensitive.IsChecked = false;
-
-                    foreach (var child in AdvDrivePanel.Children)
-                    {
-                        if (child is System.Windows.Controls.RadioButton rb && rb.Content?.ToString() == "All")
-                        {
-                            rb.IsChecked = true;
-                            break;
-                        }
-                    }
-
                     if (_isAdvSearching)
                     {
                         _searchCts?.Cancel();
                         _isAdvSearching = false;
                         AdvSearchActionBtn.Content = "Search";
-                        AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                        AdvSearchActionBtn.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "ControlBackgroundBrush");
                     }
 
                     if (TabPerf.IsChecked != true)
@@ -630,6 +648,9 @@ namespace MBRDeepDrawer
             {
                 System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(async () =>
                 {
+                    if ((DateTime.Now - _lastToggle).TotalMilliseconds < 300) return;
+                    _lastToggle = DateTime.Now;
+
                     // Prevent immediate re-opening if clicking the Start Button is what caused the window to lose focus and hide
                     if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200)
                     {
@@ -646,36 +667,77 @@ namespace MBRDeepDrawer
                 }));
             };
             InstallSystemHooks(_toggleCallback);
+        }
 
-            // Populate Drive RadioButtons
-            var rbAll = new System.Windows.Controls.RadioButton
+        private void AlignUIElements()
+        {
+            void CenterComboBox(System.Windows.Controls.ComboBox? cb)
             {
-                Content = "All",
-                GroupName = "AdvDriveGroup",
-                IsChecked = true,
-                Foreground = System.Windows.Media.Brushes.White,
-                FontSize = 16,
-                Margin = new Thickness(0, 0, 15, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            AdvDrivePanel.Children.Add(rbAll);
-
-            foreach (var drive in System.IO.DriveInfo.GetDrives())
-            {
-                if (drive.IsReady)
+                if (cb == null) return;
+                cb.HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center;
+                cb.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+                foreach (var item in cb.Items)
                 {
-                    var rb = new System.Windows.Controls.RadioButton
+                    if (item is System.Windows.Controls.ComboBoxItem cbi)
                     {
-                        Content = drive.Name.Substring(0, 1),
-                        GroupName = "AdvDriveGroup",
-                        Foreground = System.Windows.Media.Brushes.White,
-                        FontSize = 16,
-                        Margin = new Thickness(0, 0, 15, 0),
-                        VerticalAlignment = VerticalAlignment.Center
-                    };
-                    AdvDrivePanel.Children.Add(rb);
+                        cbi.HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center;
+                        cbi.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+                    }
                 }
             }
+
+            CenterComboBox(SettingsColorPalette);
+            CenterComboBox(SettingsFontColorMode);
+            CenterComboBox(SettingsFontFamily);
+            CenterComboBox(SettingsEffect);
+            CenterComboBox(AdvFileType);
+
+            // Ensure text inside input boxes is perfectly centered vertically
+            if (SearchBox != null) SearchBox.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+            if (AdvName1 != null) AdvName1.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+            if (AdvName2 != null) AdvName2.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+            if (AdvContent1 != null) AdvContent1.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+            if (AdvContent2 != null) AdvContent2.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+            if (AdvLocation != null) AdvLocation.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+        }
+
+        private void SetupDarkContextMenus()
+        {
+            void ApplyDarkMenu(System.Windows.Controls.TextBox textBox)
+            {
+                var ctxMenu = new System.Windows.Controls.ContextMenu
+                {
+                    BorderThickness = new Thickness(1)
+                };
+
+                ctxMenu.SetBinding(System.Windows.Controls.Control.BackgroundProperty, new System.Windows.Data.Binding("Background") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Window), 1) });
+                ctxMenu.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "PrimaryTextBrush");
+                ctxMenu.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "ControlBorderBrush");
+
+                var cut = new System.Windows.Controls.MenuItem { Header = "Cut", Command = System.Windows.Input.ApplicationCommands.Cut };
+                var copy = new System.Windows.Controls.MenuItem { Header = "Copy", Command = System.Windows.Input.ApplicationCommands.Copy };
+                var paste = new System.Windows.Controls.MenuItem { Header = "Paste", Command = System.Windows.Input.ApplicationCommands.Paste };
+                var selectAll = new System.Windows.Controls.MenuItem { Header = "Select All", Command = System.Windows.Input.ApplicationCommands.SelectAll };
+
+                ctxMenu.Items.Add(cut);
+                ctxMenu.Items.Add(copy);
+                ctxMenu.Items.Add(paste);
+
+                var sep = new System.Windows.Controls.Separator();
+                sep.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "ControlBorderBrush");
+                ctxMenu.Items.Add(sep);
+
+                ctxMenu.Items.Add(selectAll);
+
+                textBox.ContextMenu = ctxMenu;
+            }
+
+            if (SearchBox != null) ApplyDarkMenu(SearchBox);
+            if (AdvName1 != null) ApplyDarkMenu(AdvName1);
+            if (AdvName2 != null) ApplyDarkMenu(AdvName2);
+            if (AdvContent1 != null) ApplyDarkMenu(AdvContent1);
+            if (AdvContent2 != null) ApplyDarkMenu(AdvContent2);
+            if (AdvLocation != null) ApplyDarkMenu(AdvLocation);
         }
 
         private void LoadSettings()
@@ -691,15 +753,23 @@ namespace MBRDeepDrawer
             }
             catch { }
 
+            // Migrate opacity to new 0-100 scale if it's currently on the old 0-1 scale
+            if (_appSettings.BackgroundOpacity <= 1.0 && _appSettings.BackgroundOpacity > 0.0)
+            {
+                _appSettings.BackgroundOpacity *= 100.0;
+            }
+
             DrawerIconSize = _appSettings.DrawerIconSize;
             SidebarIconSize = _appSettings.SidebarIconSize;
             UpdateBackgroundColor();
+            UpdateFontFamily();
 
             _isInitializingSettings = true;
             if (SettingsOpacitySlider != null) SettingsOpacitySlider.Value = _appSettings.BackgroundOpacity;
             if (SettingsSpeedSlider != null) SettingsSpeedSlider.Value = _appSettings.AnimationSpeed;
             if (SettingsDrawerIconSize != null) SettingsDrawerIconSize.Value = _appSettings.DrawerIconSize;
             if (SettingsSidebarIconSize != null) SettingsSidebarIconSize.Value = _appSettings.SidebarIconSize;
+            if (SettingsFontBold != null) SettingsFontBold.IsChecked = _appSettings.FontBold;
 
             if (SettingsColorPalette != null)
             {
@@ -712,6 +782,35 @@ namespace MBRDeepDrawer
                     }
                 }
             }
+
+            if (SettingsFontColorMode != null)
+            {
+                foreach (System.Windows.Controls.ComboBoxItem item in SettingsFontColorMode.Items)
+                {
+                    if (item.Content?.ToString() == _appSettings.FontColorMode)
+                    {
+                        SettingsFontColorMode.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+
+            if (SettingsFontFamily != null)
+            {
+                bool fontFound = false;
+                foreach (System.Windows.Controls.ComboBoxItem item in SettingsFontFamily.Items)
+                {
+                    if (item.Content?.ToString() == _appSettings.FontFamily)
+                    {
+                        SettingsFontFamily.SelectedItem = item;
+                        fontFound = true;
+                        break;
+                    }
+                }
+                if (!fontFound)
+                    SettingsFontFamily.SelectedIndex = 0;
+            }
+
             if (SettingsEffect != null)
             {
                 foreach (System.Windows.Controls.ComboBoxItem item in SettingsEffect.Items)
@@ -719,6 +818,85 @@ namespace MBRDeepDrawer
                     if (item.Content?.ToString() == _appSettings.TransitionEffect)
                     {
                         SettingsEffect.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+            if (CustomColorPanel != null)
+            {
+                CustomColorPanel.Visibility = _appSettings.ColorPalette == "Custom" ? Visibility.Visible : Visibility.Collapsed;
+
+                try
+                {
+                    var col = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.CustomColorHex ?? "#1C1C1C");
+
+                    // Temporarily disable the event handler to prevent loops
+                    _isInitializingSettings = true;
+                    var hsl = RgbToHsl(col);
+                    if (SliderHue != null) SliderHue.Value = hsl.H;
+                    if (SliderLight != null) SliderLight.Value = hsl.L * 100.0;
+
+                    if (TextHue != null) TextHue.Text = Math.Round(hsl.H).ToString();
+                    if (TextLight != null) TextLight.Text = Math.Round(hsl.L * 100.0).ToString();
+
+                    if (ColorPreview != null) ColorPreview.Background = new SolidColorBrush(col);
+                    _isInitializingSettings = false;
+                }
+                catch { }
+            }
+
+            if (CustomFontColorPanel != null)
+            {
+                CustomFontColorPanel.Visibility = _appSettings.FontColorMode == "Custom" ? Visibility.Visible : Visibility.Collapsed;
+
+                try
+                {
+                    var col = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.CustomFontColorHex ?? "#FFFFFF");
+
+                    _isInitializingSettings = true;
+                    var hsl = RgbToHsl(col);
+                    if (SliderFontHue != null) SliderFontHue.Value = hsl.H;
+                    if (SliderFontLight != null) SliderFontLight.Value = hsl.L * 100.0;
+
+                    if (TextFontHue != null) TextFontHue.Text = Math.Round(hsl.H).ToString();
+                    if (TextFontLight != null) TextFontLight.Text = Math.Round(hsl.L * 100.0).ToString();
+
+                    if (FontColorPreview != null) FontColorPreview.Background = new SolidColorBrush(col);
+                    _isInitializingSettings = false;
+                }
+                catch { }
+            }
+
+            if (_appSettings.SortMode == "Categories" && SortCategory != null) SortCategory.IsChecked = true;
+            else if (_appSettings.SortMode == "Favorites" && SortFav != null) SortFav.IsChecked = true;
+            else if (SortAZ != null) SortAZ.IsChecked = true;
+
+            if (AdvCaseSensitive != null) AdvCaseSensitive.IsChecked = _appSettings.AdvCaseSensitive;
+            if (AdvLocation != null) AdvLocation.Text = _appSettings.AdvLocation ?? "";
+            if (AdvName1 != null) AdvName1.Text = _appSettings.AdvName1 ?? "";
+            if (AdvName2 != null) AdvName2.Text = _appSettings.AdvName2 ?? "";
+            if (AdvContent1 != null) AdvContent1.Text = _appSettings.AdvContent1 ?? "";
+            if (AdvContent2 != null) AdvContent2.Text = _appSettings.AdvContent2 ?? "";
+
+            if (AdvFileType != null)
+            {
+                foreach (System.Windows.Controls.ComboBoxItem item in AdvFileType.Items)
+                {
+                    if (item.Content?.ToString() == _appSettings.AdvFileType)
+                    {
+                        AdvFileType.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+
+            if (AdvDrivePanel != null)
+            {
+                foreach (var child in AdvDrivePanel.Children)
+                {
+                    if (child is System.Windows.Controls.RadioButton rb && rb.Content?.ToString() == _appSettings.AdvDrive)
+                    {
+                        rb.IsChecked = true;
                         break;
                     }
                 }
@@ -742,6 +920,9 @@ namespace MBRDeepDrawer
         {
             if (e.Button == System.Windows.Forms.MouseButtons.Left)
             {
+                if ((DateTime.Now - _lastToggle).TotalMilliseconds < 300) return;
+                _lastToggle = DateTime.Now;
+
                 // Prevent immediate re-opening if clicking the tray icon is what caused the window to lose focus and hide
                 if ((DateTime.Now - _lastDeactivated).TotalMilliseconds < 200)
                 {
@@ -779,6 +960,9 @@ namespace MBRDeepDrawer
         {
             if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
             {
+                if ((DateTime.Now - _lastToggle).TotalMilliseconds < 300) { handled = true; return IntPtr.Zero; }
+                _lastToggle = DateTime.Now;
+
                 bool nativeClosed = DismissNativeStartMenuIfVisible();
 
                 if (this.IsVisible && !nativeClosed) HideDrawer();
@@ -940,6 +1124,9 @@ namespace MBRDeepDrawer
                 var apps = new List<SearchResult>();
                 var shortcutPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+                string userStartup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+                string commonStartup = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+
                 void AddShortcuts(string directory)
                 {
                     if (!Directory.Exists(directory)) return;
@@ -950,6 +1137,10 @@ namespace MBRDeepDrawer
                             // Filter out uninstaller and help links
                             if (file.Contains("Uninstall", StringComparison.OrdinalIgnoreCase)) continue;
                             if (file.Contains("Help", StringComparison.OrdinalIgnoreCase)) continue;
+
+                            // Filter out startup folders
+                            if (!string.IsNullOrEmpty(userStartup) && file.StartsWith(userStartup, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!string.IsNullOrEmpty(commonStartup) && file.StartsWith(commonStartup, StringComparison.OrdinalIgnoreCase)) continue;
 
                             shortcutPaths.Add(file);
                         }
@@ -1156,6 +1347,14 @@ namespace MBRDeepDrawer
         private void SortMode_Changed(object sender, RoutedEventArgs e)
         {
             if (!this.IsLoaded) return;
+
+            if (!_isInitializingSettings)
+            {
+                if (SortCategory.IsChecked == true) _appSettings.SortMode = "Categories";
+                else if (SortFav.IsChecked == true) _appSettings.SortMode = "Favorites";
+                else _appSettings.SortMode = "A-Z";
+                SaveSettings();
+            }
 
             if (TabSettings.IsChecked == true)
             {
@@ -1426,7 +1625,7 @@ namespace MBRDeepDrawer
                 _searchCts?.Cancel();
                 _isAdvSearching = false;
                 AdvSearchActionBtn.Content = "Search";
-                AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                AdvSearchActionBtn.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "ControlBackgroundBrush");
                 return;
             }
 
@@ -1546,8 +1745,52 @@ namespace MBRDeepDrawer
                 {
                     _isAdvSearching = false;
                     AdvSearchActionBtn.Content = "Search";
-                    AdvSearchActionBtn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#0078D7")!;
+                    AdvSearchActionBtn.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "ControlBackgroundBrush");
                 }
+            }
+        }
+
+        private void AdvField_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (sender == AdvName1) _appSettings.AdvName1 = AdvName1.Text;
+            else if (sender == AdvName2) _appSettings.AdvName2 = AdvName2.Text;
+            else if (sender == AdvContent1) _appSettings.AdvContent1 = AdvContent1.Text;
+            else if (sender == AdvContent2) _appSettings.AdvContent2 = AdvContent2.Text;
+            SaveSettings();
+        }
+
+        private void AdvCaseSensitive_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.AdvCaseSensitive = AdvCaseSensitive.IsChecked == true;
+            SaveSettings();
+        }
+
+        private void AdvFileType_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (AdvFileType.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+            {
+                _appSettings.AdvFileType = item.Content?.ToString() ?? "Everything";
+                SaveSettings();
+            }
+        }
+
+        private void AdvLocation_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.AdvLocation = AdvLocation.Text;
+            SaveSettings();
+        }
+
+        private void AdvDrive_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (sender is System.Windows.Controls.RadioButton rb)
+            {
+                _appSettings.AdvDrive = rb.Content?.ToString() ?? "All";
+                SaveSettings();
             }
         }
 
@@ -1769,13 +2012,53 @@ namespace MBRDeepDrawer
             System.Windows.Media.Color baseColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.ColorPalette switch
             {
                 "OLED Pitch Black" => "#000000",
-                "Crimson Red" => "#2b0000",
-                "Neon Green" => "#002b00",
+                "Light Theme" => "#FFFFFF",
+                "Custom" => _appSettings.CustomColorHex ?? "#1C1C1C",
                 _ => "#1C1C1C" // MBR-Deep Dark
             });
 
-            baseColor.A = (byte)(_appSettings.BackgroundOpacity * 255);
+            SolidColorBrush primaryBrush;
+            SolidColorBrush secondaryBrush;
+
+            double luminance = (0.299 * baseColor.R + 0.587 * baseColor.G + 0.114 * baseColor.B) / 255.0;
+            bool isLightBg = luminance > 0.6;
+
+            if (_appSettings.FontColorMode == "Custom")
+            {
+                System.Windows.Media.Color customFontColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.CustomFontColorHex ?? "#FFFFFF");
+                primaryBrush = new SolidColorBrush(customFontColor);
+
+                System.Windows.Media.Color secondaryColor = customFontColor;
+                secondaryColor.A = (byte)(customFontColor.A * 0.6);
+                secondaryBrush = new SolidColorBrush(secondaryColor);
+            }
+            else
+            {
+                primaryBrush = new SolidColorBrush(isLightBg ? System.Windows.Media.Color.FromRgb(20, 20, 20) : System.Windows.Media.Colors.White);
+                secondaryBrush = new SolidColorBrush(isLightBg ? System.Windows.Media.Color.FromRgb(80, 80, 80) : System.Windows.Media.Color.FromRgb(170, 170, 170));
+            }
+
+            primaryBrush.Freeze();
+            secondaryBrush.Freeze();
+
+            this.Resources["PrimaryTextBrush"] = primaryBrush;
+            this.Resources["SecondaryTextBrush"] = secondaryBrush;
+
+            // Create dynamic brushes for UI controls
+            var controlBgBrush = new SolidColorBrush(isLightBg ? System.Windows.Media.Color.FromArgb(26, 0, 0, 0) : System.Windows.Media.Color.FromArgb(26, 255, 255, 255));
+            var controlHoverBrush = new SolidColorBrush(isLightBg ? System.Windows.Media.Color.FromArgb(51, 0, 0, 0) : System.Windows.Media.Color.FromArgb(51, 255, 255, 255));
+            var controlBorderBrush = new SolidColorBrush(isLightBg ? System.Windows.Media.Color.FromArgb(51, 0, 0, 0) : System.Windows.Media.Color.FromArgb(255, 74, 74, 74));
+            controlBgBrush.Freeze();
+            controlHoverBrush.Freeze();
+            controlBorderBrush.Freeze();
+            this.Resources["ControlBackgroundBrush"] = controlBgBrush;
+            this.Resources["ControlHoverBrush"] = controlHoverBrush;
+            this.Resources["ControlBorderBrush"] = controlBorderBrush;
+
+            double opacity = _appSettings.BackgroundOpacity / 100.0;
+            baseColor.A = (byte)(Math.Max(0.0, Math.Min(1.0, opacity)) * 255);
             this.Background = new SolidColorBrush(baseColor);
+            this.Resources["WindowBackgroundBrush"] = this.Background;
         }
 
         private void BtnOpenSettings_Click(object sender, RoutedEventArgs e)
@@ -1806,6 +2089,11 @@ namespace MBRDeepDrawer
             if (SettingsColorPalette.SelectedItem is System.Windows.Controls.ComboBoxItem item)
             {
                 _appSettings.ColorPalette = item.Content?.ToString() ?? "MBR-Deep Dark";
+
+                if (CustomColorPanel != null)
+                {
+                    CustomColorPanel.Visibility = _appSettings.ColorPalette == "Custom" ? Visibility.Visible : Visibility.Collapsed;
+                }
                 UpdateBackgroundColor();
                 SaveSettings();
             }
@@ -1817,6 +2105,153 @@ namespace MBRDeepDrawer
             _appSettings.BackgroundOpacity = SettingsOpacitySlider.Value;
             UpdateBackgroundColor();
             SaveSettings();
+        }
+
+        private void CustomColorSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+
+            double h = SliderHue?.Value ?? 0;
+            double l = (SliderLight?.Value ?? 0) / 100.0;
+
+            if (TextHue != null) TextHue.Text = Math.Round(h).ToString();
+            if (TextLight != null) TextLight.Text = Math.Round(l * 100.0).ToString();
+
+            var color = HslToRgb(h, 1.0, l);
+            if (ColorPreview != null) ColorPreview.Background = new SolidColorBrush(color);
+
+            _appSettings.CustomColorHex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+            UpdateBackgroundColor();
+            SaveSettings();
+        }
+
+        private void SettingsFontColorMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (SettingsFontColorMode.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+            {
+                _appSettings.FontColorMode = item.Content?.ToString() ?? "Auto";
+
+                if (CustomFontColorPanel != null)
+                {
+                    CustomFontColorPanel.Visibility = _appSettings.FontColorMode == "Custom" ? Visibility.Visible : Visibility.Collapsed;
+                }
+                UpdateBackgroundColor();
+                SaveSettings();
+            }
+        }
+
+        private void CustomFontColorSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+
+            double h = SliderFontHue?.Value ?? 0;
+            double l = (SliderFontLight?.Value ?? 0) / 100.0;
+
+            if (TextFontHue != null) TextFontHue.Text = Math.Round(h).ToString();
+            if (TextFontLight != null) TextFontLight.Text = Math.Round(l * 100.0).ToString();
+
+            var color = HslToRgb(h, 1.0, l);
+            if (FontColorPreview != null) FontColorPreview.Background = new SolidColorBrush(color);
+
+            _appSettings.CustomFontColorHex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+            UpdateBackgroundColor();
+            SaveSettings();
+        }
+
+        private void UpdateFontFamily()
+        {
+            try
+            {
+                this.FontFamily = new System.Windows.Media.FontFamily(_appSettings.FontFamily);
+                this.FontWeight = _appSettings.FontBold ? FontWeights.Bold : FontWeights.Normal;
+            }
+            catch
+            {
+                this.FontFamily = new System.Windows.Media.FontFamily("Segoe UI");
+                this.FontWeight = FontWeights.Normal;
+            }
+        }
+
+        private void SettingsFontFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            if (SettingsFontFamily.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+            {
+                _appSettings.FontFamily = item.Content?.ToString() ?? "Segoe UI";
+                UpdateFontFamily();
+                SaveSettings();
+            }
+        }
+
+        private void SettingsFontBold_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.FontBold = SettingsFontBold.IsChecked == true;
+            UpdateFontFamily();
+            SaveSettings();
+        }
+
+        private static System.Windows.Media.Color HslToRgb(double h, double s, double l)
+        {
+            byte r = 0, g = 0, b = 0;
+            if (s == 0)
+            {
+                r = g = b = (byte)(l * 255);
+            }
+            else
+            {
+                double v1, v2;
+                double hue = h / 360.0;
+
+                v2 = (l < 0.5) ? (l * (1 + s)) : ((l + s) - (l * s));
+                v1 = 2 * l - v2;
+
+                r = (byte)(255 * HueToRgb(v1, v2, hue + (1.0 / 3.0)));
+                g = (byte)(255 * HueToRgb(v1, v2, hue));
+                b = (byte)(255 * HueToRgb(v1, v2, hue - (1.0 / 3.0)));
+            }
+            return System.Windows.Media.Color.FromRgb(r, g, b);
+        }
+
+        private static double HueToRgb(double v1, double v2, double vH)
+        {
+            if (vH < 0) vH += 1;
+            if (vH > 1) vH -= 1;
+            if ((6 * vH) < 1) return (v1 + (v2 - v1) * 6 * vH);
+            if ((2 * vH) < 1) return v2;
+            if ((3 * vH) < 2) return (v1 + (v2 - v1) * ((2.0 / 3.0) - vH) * 6);
+            return v1;
+        }
+
+        private static (double H, double S, double L) RgbToHsl(System.Windows.Media.Color color)
+        {
+            double r = color.R / 255.0;
+            double g = color.G / 255.0;
+            double b = color.B / 255.0;
+
+            double min = Math.Min(r, Math.Min(g, b));
+            double max = Math.Max(r, Math.Max(g, b));
+            double delta = max - min;
+
+            double l = (max + min) / 2.0;
+            double h = 0, s = 0;
+
+            if (delta > 0)
+            {
+                s = (l < 0.5) ? (delta / (max + min)) : (delta / (2.0 - max - min));
+                double del_r = (((max - r) / 6.0) + (delta / 2.0)) / delta;
+                double del_g = (((max - g) / 6.0) + (delta / 2.0)) / delta;
+                double del_b = (((max - b) / 6.0) + (delta / 2.0)) / delta;
+
+                if (r == max) h = del_b - del_g;
+                else if (g == max) h = (1.0 / 3.0) + del_r - del_b;
+                else if (b == max) h = (2.0 / 3.0) + del_g - del_r;
+
+                if (h < 0) h += 1;
+                if (h > 1) h -= 1;
+            }
+            return (h * 360, s, l);
         }
 
         private void SettingsEffect_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1998,7 +2433,8 @@ namespace MBRDeepDrawer
                 for (int i = 0; i < coreCount; i++)
                 {
                     _coreHistory[i] = new double[60];
-                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#4a4a4a")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    border.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
                     var grid = new Grid { Margin = new Thickness(10) };
                     grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                     grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -2070,7 +2506,8 @@ namespace MBRDeepDrawer
                 for (int i = 0; i < diskCount; i++)
                 {
                     _detailedDiskHistory[i] = new double[60];
-                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#4a4a4a")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    var border = new Border { Background = System.Windows.Media.Brushes.Transparent, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Margin = new Thickness(5) };
+                    border.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
                     var grid = new Grid { Margin = new Thickness(10) };
                     grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                     grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -2359,11 +2796,25 @@ namespace MBRDeepDrawer
     public class AppSettings
     {
         public string ColorPalette { get; set; } = "MBR-Deep Dark";
-        public double BackgroundOpacity { get; set; } = 0.9;
+        public double BackgroundOpacity { get; set; } = 90.0;
+        public string CustomColorHex { get; set; } = "#1C1C1C";
+        public string FontColorMode { get; set; } = "Auto";
+        public string FontFamily { get; set; } = "Segoe UI";
+        public bool FontBold { get; set; } = true;
+        public string CustomFontColorHex { get; set; } = "#FFFFFF";
         public string TransitionEffect { get; set; } = "None";
         public double AnimationSpeed { get; set; } = 0.5;
         public double DrawerIconSize { get; set; } = 64.0;
         public double SidebarIconSize { get; set; } = 72.0;
+        public string SortMode { get; set; } = "A-Z";
+        public bool AdvCaseSensitive { get; set; } = false;
+        public string AdvFileType { get; set; } = "Everything";
+        public string AdvLocation { get; set; } = "";
+        public string AdvDrive { get; set; } = "All";
+        public string AdvName1 { get; set; } = "";
+        public string AdvName2 { get; set; } = "";
+        public string AdvContent1 { get; set; } = "";
+        public string AdvContent2 { get; set; } = "";
     }
 
     [ComImport]
