@@ -22,6 +22,9 @@ if (-Not (Test-Path "..\Engine\fast_search.dll")) {
     exit 1
 }
 
+Write-Host "Setting fast_search.dll to read-only..."
+Set-ItemProperty -Path "..\Engine\fast_search.dll" -Name IsReadOnly -Value $true
+
 # Update the output tree
 Write-Host "Updating output_tree.txt..." -ForegroundColor Cyan
 cmd /c "cd ..\.. && update_tree.bat"
@@ -39,7 +42,7 @@ Write-Host "Compiling main.py into an executable..."
     --add-data "..\Engine\fast_search.dll;." `
     --add-data "..\..\icon.ico;." `
     --collect-all "sv_ttk" `
-    --name "MBR-Deep" `
+    --name "MBR-Deep-Classic" `
     main.py
 
 if ($LASTEXITCODE -ne 0) {
@@ -47,4 +50,4 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "Build complete! You can find your compiled application at 'dist\MBR-Deep.exe'."
+Write-Host "Build complete! You can find your compiled application at 'dist\MBR-Deep-Classic.exe'."

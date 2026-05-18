@@ -6,6 +6,12 @@ import threading
 import queue
 import concurrent.futures
 
+# Prevent PyInstaller --windowed invalid file descriptor crashes from native C libraries
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
 try:
     import pypdfium2 as pdfium
     HAS_PDFIUM = True
@@ -80,26 +86,31 @@ def get_icon(ext, is_folder=False):
     icon_cache[cache_key] = None
     return None
 
+# The PDFium C++ library is not thread-safe and will cause segmentation faults if accessed concurrently
+pdf_lock = threading.Lock()
+
 def search_pdf(filepath, search_bytes, case_sensitive):
     if not HAS_PDFIUM:
-        print(f"[!] WARNING: PDF search skipped for {filepath}. Run '.\\.env\\Scripts\\pip install pypdfium2'")
+        # print(f"[!] WARNING: PDF search skipped for {filepath}. Run '.\\.env\\Scripts\\pip install pypdfium2'")
         return False
     try:
-        search_str = search_bytes.decode('utf-8')
-        if not case_sensitive:
-            search_str = search_str.lower()
+        with pdf_lock:
+            search_str = search_bytes.decode('utf-8')
+            if not case_sensitive:
+                search_str = search_str.lower()
 
-        pdf = pdfium.PdfDocument(filepath)
-        for page in pdf:
-            textpage = page.get_textpage()
-            text = textpage.get_text_bounded()
-            if text:
-                if not case_sensitive:
-                    text = text.lower()
-                if search_str in text:
-                    return True
+            pdf = pdfium.PdfDocument(filepath)
+            for page in pdf:
+                textpage = page.get_textpage()
+                text = textpage.get_text_bounded()
+                if text:
+                    if not case_sensitive:
+                        text = text.lower()
+                    if search_str in text:
+                        return True
     except Exception as e:
-        print(f"[!] Error parsing PDF {filepath}: {e}")
+        # print(f"[!] Error parsing PDF {filepath}: {e}")
+        pass
     return False
 
 FILE_TYPE_EXTS = {
@@ -231,7 +242,7 @@ def start_search():
 
     def poll_queue():
         try:
-            while True:
+            for _ in range(50):  # Process up to 50 items per tick to prevent UI thread starvation
                 msg_type, data = ui_queue.get_nowait()
                 if msg_type == "match":
                     file_name, size_str, full_path, match_count, is_folder, ext = data
@@ -333,7 +344,8 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                 if not full_path.lower().endswith(exts):
                     return
 
-            print(f"[>] Checking: {full_path}")
+            # Highly intensive print disabled to prevent PyInstaller --windowed buffer crashes
+            # print(f"[>] Checking: {full_path}")
 
             try:
                 # Pass the file path to the appropriate C-engine scanner
@@ -376,13 +388,14 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                         size_str = f"{file_size / (1024 * 1024):.1f} MB"
                     ext = os.path.splitext(full_path)[1].lower()
 
-                print(f"  ---> MATCH FOUND: {full_path}")
+                # print(f"  ---> MATCH FOUND: {full_path}")
                 with match_lock:
                     match_count += 1
                     current_match = match_count
                 ui_queue.put(("match", (file_name, size_str, full_path, current_match, is_folder, ext)))
             except Exception as e:
-                print(f"  ---> ERROR reading {full_path}: {e}")
+                # print(f"  ---> ERROR reading {full_path}: {e}")
+                pass
 
         # Execute file checks concurrently utilizing the thread pool
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -399,7 +412,7 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
 
 # Setup Main Window
 root = tk.Tk()
-root.title("MBR-Deep")
+root.title("MBR-Deep-Classic")
 root.geometry("1050x500")
 
 try:
