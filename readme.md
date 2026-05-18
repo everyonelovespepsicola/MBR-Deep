@@ -6,6 +6,13 @@ MBR-Deep is a high-performance Windows file search utility that queries the NTFS
 
 *(Note: The original all-in-one Python/Tkinter application is still fully intact and available in the source code.)*
 
+## 🪟 App Drawer vs. Classic UI
+
+MBR-Deep offers two distinct ways to search your system:
+
+- **The App Drawer (Modern):** A lightning-fast, C#/.NET 10 WPF overlay designed to replace your Start Menu. It runs securely as a standard user process and communicates instantly with a background Windows Service (`MBR-DeepService`) for zero-overhead, always-on file and app discovery via a global hotkey (e.g., `Alt+Space`).
+- **MBR-Deep Classic (Legacy):** The original Python/Tkinter all-in-one standalone executable. It requires direct Administrator privileges to run but excels at deep, multi-threaded content grepping (PDFs, Archives) and acts as a traditional, portable desktop search utility without needing to install a background service.
+
 ![Advanced Search Results](images/04.png)
 ![App Drawer System Tasks](images/03.png)
 ![App Drawer Programs](images/02.png)

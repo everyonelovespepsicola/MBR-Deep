@@ -216,6 +216,7 @@ namespace MBRDeepDrawer
         private bool _isExplicitExit = false;
         private DateTime _lastDeactivated;
         private DateTime _lastToggle = DateTime.MinValue;
+        private DateTime _lastOpened = DateTime.MinValue;
         private bool _isAdvSearching = false;
 
         public ImageSource? IconThisPC { get; set; }
@@ -278,6 +279,8 @@ namespace MBRDeepDrawer
         private void ShowDrawer()
         {
             if (_isAnimating) return;
+
+            _lastOpened = DateTime.Now;
 
             if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
             {
@@ -506,8 +509,12 @@ namespace MBRDeepDrawer
 
                         if (fgPid != _myPid)
                         {
-                            _lastDeactivated = DateTime.Now;
-                            HideDrawer();
+                            // Add a grace period to prevent instant hiding when Windows blocks focus stealing
+                            if ((DateTime.Now - _lastOpened).TotalMilliseconds > 500)
+                            {
+                                _lastDeactivated = DateTime.Now;
+                                HideDrawer();
+                            }
                         }
                     }
                 }
@@ -655,6 +662,11 @@ namespace MBRDeepDrawer
 
                     // Reset the UI cleanly when the window is hidden
                     SearchBox.Text = "";
+
+                    if (AdvName1 != null) AdvName1.Text = "";
+                    if (AdvName2 != null) AdvName2.Text = "";
+                    if (AdvContent1 != null) AdvContent1.Text = "";
+                    if (AdvContent2 != null) AdvContent2.Text = "";
 
                     if (_isAdvSearching)
                     {
@@ -1525,6 +1537,7 @@ namespace MBRDeepDrawer
 
                 ResultsList.Visibility = Visibility.Visible;
                 BasicSearchPanel.Visibility = Visibility.Visible;
+                if (AdvancedPanel != null) AdvancedPanel.Visibility = Visibility.Collapsed;
 
                 SearchBox.Clear();
                 SearchBox.Focus();
