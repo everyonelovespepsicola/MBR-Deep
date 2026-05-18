@@ -470,9 +470,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g_winKeyIsDown = 0;
 
                 if (!g_otherKeyPressed && g_ToggleCallback) {
-                    // Trick Windows into thinking a combo was pressed so it aborts the native Start Menu
-                    keybd_event(0xDF, 0, 0, 0); // VK_OEM_8
-                    keybd_event(0xDF, 0, KEYEVENTF_KEYUP, 0);
+                    // Trick Windows into thinking a combo was pressed to abort the native Start Menu.
+                    // By using 'B' (0x42) instead of a dummy key, we simulate "Win + B".
+                    // This native shortcut seamlessly forces the Taskbar to appear over fullscreen games!
+                    keybd_event(0x42, 0, 0, 0); // 'B' key down
+                    keybd_event(0x42, 0, KEYEVENTF_KEYUP, 0); // 'B' key up
 
                     // Tell the C# UI to toggle itself
                     g_ToggleCallback();

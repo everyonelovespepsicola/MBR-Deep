@@ -73,7 +73,7 @@ namespace MBRDeepDrawer
         private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+        private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -82,6 +82,9 @@ namespace MBRDeepDrawer
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindowEx(IntPtr parentHandle, IntPtr childAfter, string className, string? windowTitle);
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
@@ -100,6 +103,7 @@ namespace MBRDeepDrawer
         private const int CSIDL_DRIVES = 0x0011; // My Computer / This PC
 
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_SHOWWINDOW = 0x0040;
@@ -390,6 +394,25 @@ namespace MBRDeepDrawer
             return false;
         }
 
+        private void SetTaskbarTopmost(bool isTopmost)
+        {
+            IntPtr flag = isTopmost ? HWND_TOPMOST : HWND_NOTOPMOST;
+            uint flags = isTopmost ? (SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW) : (SWP_NOMOVE | SWP_NOSIZE);
+
+            IntPtr taskbarHwnd = FindWindow("Shell_TrayWnd", null);
+            if (taskbarHwnd != IntPtr.Zero)
+            {
+                SetWindowPos(taskbarHwnd, flag, 0, 0, 0, 0, flags);
+            }
+
+            // Loop to handle all secondary monitors' taskbars
+            IntPtr secTaskbarHwnd = IntPtr.Zero;
+            while ((secTaskbarHwnd = FindWindowEx(IntPtr.Zero, secTaskbarHwnd, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
+            {
+                SetWindowPos(secTaskbarHwnd, flag, 0, 0, 0, 0, flags);
+            }
+        }
+
         private async Task StartTelemetryAsync(CancellationToken token)
         {
             try
@@ -596,6 +619,9 @@ namespace MBRDeepDrawer
             {
                 if (this.IsVisible)
                 {
+                    // Force the taskbar to appear over any borderless fullscreen games
+                    SetTaskbarTopmost(true);
+
                     _focusCheckTimer?.Start();
 
                     if (TabPerf.IsChecked == true)
@@ -620,6 +646,9 @@ namespace MBRDeepDrawer
                 }
                 else
                 {
+                    // Restore the taskbar's default (non-topmost) state
+                    SetTaskbarTopmost(false);
+
                     _focusCheckTimer?.Stop();
                     _perfTimer?.Stop();
                     _telemetryCts?.Cancel();
