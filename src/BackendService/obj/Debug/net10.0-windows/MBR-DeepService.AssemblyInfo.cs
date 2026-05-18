@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("MBR-Deep Background Search Engine Service")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c66304986bba86069cdb00bf1a041fa8cf9c322a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6be044ecf480be543cb8d20d6957c20a0976ca69")]
 [assembly: System.Reflection.AssemblyProductAttribute("MBR-Deep")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MBR-Deep Engine")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

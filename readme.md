@@ -6,6 +6,11 @@ MBR-Deep is a high-performance Windows file search utility that queries the NTFS
 
 *(Note: The original all-in-one Python/Tkinter application is still fully intact and available in the source code.)*
 
+![Advanced Search Results](images/04.png)
+![App Drawer System Tasks](images/03.png)
+![App Drawer Programs](images/02.png)
+![MBR-Deep Classic UI](images/01.png)
+
 ## ✨ Features
 
 - **Instant-Summon App Drawer:** Acts as a complete Start Menu overlay, accessible instantly via global hotkeys.

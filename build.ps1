@@ -44,6 +44,7 @@ Write-Host "Compiling fast_search.c into fast_search.dll..." -ForegroundColor Cy
 # Run the batch script and the compiler in the same cmd.exe session
 # Explicitly delete the object file to ensure a full recompile after C code changes
 Remove-Item "src\Engine\fast_search.obj" -ErrorAction SilentlyContinue
+Remove-Item "src\Engine\fast_search.dll" -Force -ErrorAction SilentlyContinue
 
 cmd.exe /c "`"$vcvars`" && cl.exe /LD src\Engine\fast_search.c /I`"$LIBARCHIVE_INCLUDE_PATH`" /Fo:src\Engine\fast_search.obj /Fe:src\Engine\fast_search.dll /link $LINK_LIBS"
 Move-Item -Path "fast_search.lib", "fast_search.exp" -Destination "src\Engine\" -Force -ErrorAction SilentlyContinue

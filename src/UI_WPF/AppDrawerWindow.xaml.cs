@@ -1181,6 +1181,32 @@ namespace MBRDeepDrawer
                 AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
                 AddShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
 
+                // Grab UWP Apps (Calculator, Terminal, Snipping Tool, etc.)
+                var uwpApps = new List<(string Name, string Path)>();
+                try
+                {
+                    Type? shellAppType = Type.GetTypeFromProgID("Shell.Application");
+                    if (shellAppType != null)
+                    {
+                        dynamic shell = Activator.CreateInstance(shellAppType)!;
+                        dynamic folder = shell.NameSpace("shell:::{4234d49b-0245-4df3-b780-3893943456e1}");
+                        if (folder != null)
+                        {
+                            foreach (dynamic item in folder.Items())
+                            {
+                                string path = item.Path;
+                                string name = item.Name;
+                                // UWP Apps and other modern Windows components have '!' in their Application User Model ID
+                                if (!string.IsNullOrEmpty(path) && path.Contains("!"))
+                                {
+                                    uwpApps.Add((name, "shell:AppsFolder\\" + path));
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
                 bool isFavoritesSort = false;
                 System.Windows.Application.Current.Dispatcher.Invoke(() => isFavoritesSort = SortFav.IsChecked == true);
 
@@ -1200,6 +1226,14 @@ namespace MBRDeepDrawer
                     }
 
                     apps.Add(new SearchResult { FileName = path, DisplayName = name, Icon = icon, Category = "Programs", MainCategory = "Programs", SubCategory = subCategory });
+                }
+
+                foreach (var uwp in uwpApps)
+                {
+                    ImageSource? icon = null;
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => icon = GetSpecificFileIcon(uwp.Path));
+
+                    apps.Add(new SearchResult { FileName = uwp.Path, DisplayName = uwp.Name, Icon = icon, Category = "Programs", MainCategory = "Programs", SubCategory = "Windows Apps" });
                 }
 
                 if (isFavoritesSort)
@@ -1277,6 +1311,33 @@ namespace MBRDeepDrawer
 
         private ImageSource? GetSpecificFileIcon(string filePath)
         {
+            // 0. Handle virtual shell items like UWP Apps (shell:AppsFolder\...)
+            if (filePath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    if (SHParseDisplayName(filePath, IntPtr.Zero, out IntPtr pidl, 0, out _) == 0 && pidl != IntPtr.Zero)
+                    {
+                        SHFILEINFO shinfoShell = new SHFILEINFO();
+                        IntPtr hImgShell = SHGetFileInfo(pidl, 0, ref shinfoShell, (uint)Marshal.SizeOf(shinfoShell), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL);
+
+                        if (shinfoShell.hIcon != IntPtr.Zero)
+                        {
+                            var img = Imaging.CreateBitmapSourceFromHIcon(
+                                shinfoShell.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+
+                            DestroyIcon(shinfoShell.hIcon);
+                            img?.Freeze();
+                            ILFree(pidl);
+                            return img;
+                        }
+
+                        ILFree(pidl);
+                    }
+                }
+                catch { /* Ignore parsing errors for shell items */ }
+            }
+
             // 1. If it's a shortcut, read the RAW TARGET to completely bypass the Windows Shell arrow overlay!
             if (filePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
             {
