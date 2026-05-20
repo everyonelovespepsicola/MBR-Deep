@@ -19,6 +19,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Shaders\GenieEffect.ps" />
+    <Resource Include="Shaders\*.ps" />
   </ItemGroup>
 </Project>

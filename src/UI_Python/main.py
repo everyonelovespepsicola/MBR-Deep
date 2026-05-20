@@ -196,6 +196,54 @@ import string
 cancel_event = threading.Event()
 ui_queue = queue.Queue()
 
+current_results = []
+
+def insert_result(data, use_tree):
+    file_name, size_str, full_path, match_count, is_folder, ext = data
+    tags = ("even",) if match_count % 2 == 0 else ()
+    kwargs = {}
+    if HAS_PYWIN32_PILLOW:
+        photo = get_icon(ext, is_folder)
+        if photo:
+            kwargs['image'] = photo
+
+    if use_tree:
+        parts = full_path.split('\\')
+
+        # Ensure root drive exists
+        drive_iid = parts[0] + "\\"
+        if not tree.exists(drive_iid):
+            folder_kwargs = {}
+            if HAS_PYWIN32_PILLOW:
+                folder_photo = get_icon("", True)
+                if folder_photo:
+                    folder_kwargs['image'] = folder_photo
+            tree.insert('', 'end', iid=drive_iid, text=f" {drive_iid}", values=("", drive_iid), open=True, **folder_kwargs)
+
+        parent_iid = drive_iid
+        for i in range(1, len(parts) - 1):
+            current_iid = "\\".join(parts[:i+1])
+            if not tree.exists(current_iid):
+                folder_kwargs = {}
+                if HAS_PYWIN32_PILLOW:
+                    folder_photo = get_icon("", True)
+                    if folder_photo:
+                        folder_kwargs['image'] = folder_photo
+                tree.insert(parent_iid, 'end', iid=current_iid, text=f" {parts[i]}", values=("", current_iid), open=True, **folder_kwargs)
+            parent_iid = current_iid
+
+        file_iid = full_path
+        if not tree.exists(file_iid):
+            tree.insert(parent_iid, 'end', iid=file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+        else:
+            tree.item(file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+    else:
+        file_iid = full_path
+        if not tree.exists(file_iid):
+            tree.insert('', 'end', iid=file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+        else:
+            tree.item(file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+
 def start_search():
     if getattr(start_search, "is_running", False): return
     start_search.is_running = True
@@ -238,6 +286,9 @@ def start_search():
     for item in tree.get_children():
         tree.delete(item)
 
+    global current_results
+    current_results.clear()
+
     print("\n" + "="*50 + "\n--- Starting New Search ---\n" + "="*50)
 
     def poll_queue():
@@ -245,14 +296,8 @@ def start_search():
             for _ in range(50):  # Process up to 50 items per tick to prevent UI thread starvation
                 msg_type, data = ui_queue.get_nowait()
                 if msg_type == "match":
-                    file_name, size_str, full_path, match_count, is_folder, ext = data
-                    tags = ("even",) if match_count % 2 == 0 else ()
-                    kwargs = {}
-                    if HAS_PYWIN32_PILLOW:
-                        photo = get_icon(ext, is_folder)
-                        if photo:
-                            kwargs['image'] = photo
-                    tree.insert('', 'end', text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+                    current_results.append(data)
+                    insert_result(data, var_tree_view.get())
                 elif msg_type == "status":
                     lbl_status.config(text=data[0], foreground=data[1])
                 elif msg_type == "done":
@@ -645,8 +690,28 @@ tree.pack(side="left", fill="both", expand=True)
 
 tree.tag_configure("even", background="#2a2a2a")
 
-lbl_status = ttk.Label(root, text="Ready. (Ensure terminal is running as Administrator)", foreground="#AAAAAA")
-lbl_status.pack(side="bottom", pady=5)
+frame_bottom = ttk.Frame(root)
+frame_bottom.pack(side="bottom", fill="x", padx=10, pady=5)
+
+var_tree_view = tk.BooleanVar(value=False)
+
+def toggle_view():
+    for item in tree.get_children():
+        tree.delete(item)
+    use_tree = var_tree_view.get()
+    if use_tree:
+        tree.heading("#0", text="Folder / File")
+    else:
+        tree.heading("#0", text="File")
+
+    for data in current_results:
+        insert_result(data, use_tree)
+
+chk_view = ttk.Checkbutton(frame_bottom, text="View", variable=var_tree_view, command=toggle_view)
+chk_view.pack(side="left")
+
+lbl_status = ttk.Label(frame_bottom, text="Ready. (Ensure terminal is running as Administrator)", foreground="#AAAAAA", anchor="center")
+lbl_status.pack(side="left", fill="x", expand=True, padx=(0, 50)) # Added right padding to perfectly center the text in the window
 
 # Context Menu Actions
 def get_selected_path():

@@ -153,7 +153,7 @@ namespace MBRDeepDrawer
         // --- Settings State ---
         private AppSettings _appSettings = new AppSettings();
         private string _settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "config.json");
-        private bool _isInitializingSettings = false;
+        private bool _isInitializingSettings = true;
 
         public static readonly DependencyProperty DrawerIconSizeProperty =
             DependencyProperty.Register("DrawerIconSize", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(64.0));
@@ -218,6 +218,7 @@ namespace MBRDeepDrawer
         private DateTime _lastToggle = DateTime.MinValue;
         private DateTime _lastOpened = DateTime.MinValue;
         private bool _isAdvSearching = false;
+        private bool _hasGainedFocusSinceOpen = false;
 
         public ImageSource? IconThisPC { get; set; }
         public ImageSource? IconControlPanel { get; set; }
@@ -227,6 +228,11 @@ namespace MBRDeepDrawer
 
         private bool _isAnimating = false;
         private Shaders.GenieEffect? _sharedGenieEffect;
+        private Shaders.BurnEffect? _sharedBurnEffect;
+        private Shaders.BeamEffect? _sharedBeamEffect;
+        private Shaders.ExplodeEffect? _sharedExplodeEffect;
+        private Shaders.SandstormEffect? _sharedSandstormEffect;
+        private Shaders.PlinkoEffect? _sharedPlinkoEffect;
         private static readonly BitmapCache _sharedBitmapCache = new BitmapCache { EnableClearType = false, SnapsToDevicePixels = true };
 
         private void HideDrawer()
@@ -236,6 +242,7 @@ namespace MBRDeepDrawer
             // Fallback to instant hide if the user selected "None" in the Settings
             if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
             {
+                UpdateBackgroundColor();
                 this.Hide();
                 return;
             }
@@ -251,29 +258,163 @@ namespace MBRDeepDrawer
                     targetX = Math.Max(0.0, Math.Min(1.0, targetX));
                 }
 
-                if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
-
-                _sharedGenieEffect.TargetX = targetX;
-                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null); // Clear old animation
-                _sharedGenieEffect.Progress = 0.0;
-
                 RootGrid.CacheMode = _sharedBitmapCache;
-                RootGrid.Effect = _sharedGenieEffect; // Apply the GPU shader directly to the UI tree
+                System.Windows.Media.Animation.DoubleAnimation anim;
 
-                var anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                var bgAnim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
                 {
                     EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
                 };
-                anim.Completed += (s, e) =>
+                var mutableBg = this.Background.CloneCurrentValue();
+                this.Background = mutableBg;
+                mutableBg.BeginAnimation(System.Windows.Media.Brush.OpacityProperty, bgAnim);
+
+                if (_appSettings.TransitionEffect == "Burn")
                 {
-                    RootGrid.Effect = null;
-                    RootGrid.CacheMode = null;
-                    this.Hide();
-                    _isAnimating = false;
-                };
-                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+                    if (_sharedBurnEffect == null) _sharedBurnEffect = new Shaders.BurnEffect();
+                    _sharedBurnEffect.TargetX = targetX;
+                    _sharedBurnEffect.BeginAnimation(Shaders.BurnEffect.ProgressProperty, null);
+                    _sharedBurnEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedBurnEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor(); // Clear animation to reset for next time
+                        _isAnimating = false;
+                    };
+                    _sharedBurnEffect.BeginAnimation(Shaders.BurnEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Beam")
+                {
+                    if (_sharedBeamEffect == null) _sharedBeamEffect = new Shaders.BeamEffect();
+                    _sharedBeamEffect.TargetX = targetX;
+                    _sharedBeamEffect.BeginAnimation(Shaders.BeamEffect.ProgressProperty, null);
+                    _sharedBeamEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedBeamEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedBeamEffect.BeginAnimation(Shaders.BeamEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Explode")
+                {
+                    if (_sharedExplodeEffect == null) _sharedExplodeEffect = new Shaders.ExplodeEffect();
+                    _sharedExplodeEffect.TargetX = targetX;
+                    _sharedExplodeEffect.BeginAnimation(Shaders.ExplodeEffect.ProgressProperty, null);
+                    _sharedExplodeEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedExplodeEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedExplodeEffect.BeginAnimation(Shaders.ExplodeEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Sandstorm")
+                {
+                    if (_sharedSandstormEffect == null) _sharedSandstormEffect = new Shaders.SandstormEffect();
+                    _sharedSandstormEffect.TargetX = targetX;
+                    _sharedSandstormEffect.BeginAnimation(Shaders.SandstormEffect.ProgressProperty, null);
+                    _sharedSandstormEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedSandstormEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedSandstormEffect.BeginAnimation(Shaders.SandstormEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Plinko")
+                {
+                    if (_sharedPlinkoEffect == null) _sharedPlinkoEffect = new Shaders.PlinkoEffect();
+                    _sharedPlinkoEffect.TargetX = targetX;
+                    _sharedPlinkoEffect.BeginAnimation(Shaders.PlinkoEffect.ProgressProperty, null);
+                    _sharedPlinkoEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedPlinkoEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedPlinkoEffect.BeginAnimation(Shaders.PlinkoEffect.ProgressProperty, anim);
+                }
+                else
+                {
+                    if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
+                    _sharedGenieEffect.TargetX = targetX;
+                    _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null);
+                    _sharedGenieEffect.Progress = 0.0;
+                    RootGrid.Effect = _sharedGenieEffect;
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        this.Hide();
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+                }
             }
-            catch { this.Hide(); _isAnimating = false; }
+            catch { UpdateBackgroundColor(); this.Hide(); _isAnimating = false; }
+        }
+
+        public void ExternalShowDrawer()
+        {
+            if (this.IsVisible)
+            {
+                ForceForeground();
+            }
+            else
+            {
+                ShowDrawer();
+            }
         }
 
         private void ShowDrawer()
@@ -281,9 +422,11 @@ namespace MBRDeepDrawer
             if (_isAnimating) return;
 
             _lastOpened = DateTime.Now;
+            _hasGainedFocusSinceOpen = false;
 
             if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
             {
+                UpdateBackgroundColor();
                 this.Show();
                 ForceForeground();
                 return;
@@ -299,32 +442,164 @@ namespace MBRDeepDrawer
                     targetX = Math.Max(0.0, Math.Min(1.0, targetX));
                 }
 
-                if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
-
-                _sharedGenieEffect.TargetX = targetX;
-                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null); // Clear old animation
-                _sharedGenieEffect.Progress = 1.0;
-
                 RootGrid.CacheMode = _sharedBitmapCache;
-                RootGrid.Effect = _sharedGenieEffect;
 
-                // Show the window AFTER setting Progress = 1.0 to prevent a 1-frame visual pop/flicker
-                this.Show();
-                ForceForeground();
+                System.Windows.Media.Animation.DoubleAnimation anim;
 
-                var anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                var bgAnim = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
                 {
                     EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
                 };
-                anim.Completed += (s, e) =>
+                var mutableBg = this.Background.CloneCurrentValue();
+                this.Background = mutableBg;
+                mutableBg.BeginAnimation(System.Windows.Media.Brush.OpacityProperty, bgAnim);
+
+                if (_appSettings.TransitionEffect == "Burn")
                 {
-                    RootGrid.Effect = null;
-                    RootGrid.CacheMode = null;
-                    _isAnimating = false;
-                };
-                _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+                    if (_sharedBurnEffect == null) _sharedBurnEffect = new Shaders.BurnEffect();
+                    _sharedBurnEffect.TargetX = targetX;
+                    _sharedBurnEffect.BeginAnimation(Shaders.BurnEffect.ProgressProperty, null);
+                    _sharedBurnEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedBurnEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedBurnEffect.BeginAnimation(Shaders.BurnEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Beam")
+                {
+                    if (_sharedBeamEffect == null) _sharedBeamEffect = new Shaders.BeamEffect();
+                    _sharedBeamEffect.TargetX = targetX;
+                    _sharedBeamEffect.BeginAnimation(Shaders.BeamEffect.ProgressProperty, null);
+                    _sharedBeamEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedBeamEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedBeamEffect.BeginAnimation(Shaders.BeamEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Explode")
+                {
+                    if (_sharedExplodeEffect == null) _sharedExplodeEffect = new Shaders.ExplodeEffect();
+                    _sharedExplodeEffect.TargetX = targetX;
+                    _sharedExplodeEffect.BeginAnimation(Shaders.ExplodeEffect.ProgressProperty, null);
+                    _sharedExplodeEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedExplodeEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedExplodeEffect.BeginAnimation(Shaders.ExplodeEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Sandstorm")
+                {
+                    if (_sharedSandstormEffect == null) _sharedSandstormEffect = new Shaders.SandstormEffect();
+                    _sharedSandstormEffect.TargetX = targetX;
+                    _sharedSandstormEffect.BeginAnimation(Shaders.SandstormEffect.ProgressProperty, null);
+                    _sharedSandstormEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedSandstormEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedSandstormEffect.BeginAnimation(Shaders.SandstormEffect.ProgressProperty, anim);
+                }
+                else if (_appSettings.TransitionEffect == "Plinko")
+                {
+                    if (_sharedPlinkoEffect == null) _sharedPlinkoEffect = new Shaders.PlinkoEffect();
+                    _sharedPlinkoEffect.TargetX = targetX;
+                    _sharedPlinkoEffect.BeginAnimation(Shaders.PlinkoEffect.ProgressProperty, null);
+                    _sharedPlinkoEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedPlinkoEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedPlinkoEffect.BeginAnimation(Shaders.PlinkoEffect.ProgressProperty, anim);
+                }
+                else
+                {
+                    if (_sharedGenieEffect == null) _sharedGenieEffect = new Shaders.GenieEffect();
+                    _sharedGenieEffect.TargetX = targetX;
+                    _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, null);
+                    _sharedGenieEffect.Progress = 1.0;
+                    RootGrid.Effect = _sharedGenieEffect;
+
+                    this.Show();
+                    ForceForeground();
+
+                    anim = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, TimeSpan.FromSeconds(_appSettings.AnimationSpeed))
+                    {
+                        EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    anim.Completed += (s, e) =>
+                    {
+                        RootGrid.Effect = null;
+                        RootGrid.CacheMode = null;
+                        UpdateBackgroundColor();
+                        _isAnimating = false;
+                    };
+                    _sharedGenieEffect.BeginAnimation(Shaders.GenieEffect.ProgressProperty, anim);
+                }
             }
-            catch { this.Show(); ForceForeground(); _isAnimating = false; }
+            catch { UpdateBackgroundColor(); this.Show(); ForceForeground(); _isAnimating = false; }
         }
 
         private void ForceForeground()
@@ -343,9 +618,19 @@ namespace MBRDeepDrawer
                 // Trick Windows by attaching our thread to the active foreground thread
                 if (foregroundThreadId != targetThreadId)
                 {
-                    AttachThreadInput(foregroundThreadId, targetThreadId, true);
-                    SetForegroundWindow(targetHwnd);
-                    AttachThreadInput(foregroundThreadId, targetThreadId, false);
+                    if (AttachThreadInput(foregroundThreadId, targetThreadId, true))
+                    {
+                        SetForegroundWindow(targetHwnd);
+                        AttachThreadInput(foregroundThreadId, targetThreadId, false);
+                    }
+                    else
+                    {
+                        // Fallback: If UIPI blocks thread attachment (e.g. foreground is Admin),
+                        // spoofing an ALT keypress can bypass the SetForegroundWindow block.
+                        keybd_event(0x12, 0, 0, 0);       // VK_MENU (Alt) Down
+                        keybd_event(0x12, 0, 0x0002, 0);  // VK_MENU (Alt) Up
+                        SetForegroundWindow(targetHwnd);
+                    }
                 }
                 else
                 {
@@ -509,13 +794,22 @@ namespace MBRDeepDrawer
 
                         if (fgPid != _myPid)
                         {
-                            // Add a grace period to prevent instant hiding when Windows blocks focus stealing
-                            if ((DateTime.Now - _lastOpened).TotalMilliseconds > 500)
+                            // Add a grace period to prevent instant hiding when Windows blocks focus stealing.
+                            // Only hide if we successfully grabbed focus first, or if a reasonable timeout has passed.
+                            if (_hasGainedFocusSinceOpen || (DateTime.Now - _lastOpened).TotalMilliseconds > 1500)
                             {
                                 _lastDeactivated = DateTime.Now;
                                 HideDrawer();
                             }
                         }
+                        else
+                        {
+                            _hasGainedFocusSinceOpen = true;
+                        }
+                    }
+                    else
+                    {
+                        _hasGainedFocusSinceOpen = true;
                     }
                 }
             };
@@ -871,8 +1165,6 @@ namespace MBRDeepDrawer
                 {
                     var col = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.CustomColorHex ?? "#1C1C1C");
 
-                    // Temporarily disable the event handler to prevent loops
-                    _isInitializingSettings = true;
                     var hsl = RgbToHsl(col);
                     if (SliderHue != null) SliderHue.Value = hsl.H;
                     if (SliderLight != null) SliderLight.Value = hsl.L * 100.0;
@@ -881,7 +1173,6 @@ namespace MBRDeepDrawer
                     if (TextLight != null) TextLight.Text = Math.Round(hsl.L * 100.0).ToString();
 
                     if (ColorPreview != null) ColorPreview.Background = new SolidColorBrush(col);
-                    _isInitializingSettings = false;
                 }
                 catch { }
             }
@@ -894,7 +1185,6 @@ namespace MBRDeepDrawer
                 {
                     var col = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_appSettings.CustomFontColorHex ?? "#FFFFFF");
 
-                    _isInitializingSettings = true;
                     var hsl = RgbToHsl(col);
                     if (SliderFontHue != null) SliderFontHue.Value = hsl.H;
                     if (SliderFontLight != null) SliderFontLight.Value = hsl.L * 100.0;
@@ -903,7 +1193,6 @@ namespace MBRDeepDrawer
                     if (TextFontLight != null) TextFontLight.Text = Math.Round(hsl.L * 100.0).ToString();
 
                     if (FontColorPreview != null) FontColorPreview.Background = new SolidColorBrush(col);
-                    _isInitializingSettings = false;
                 }
                 catch { }
             }

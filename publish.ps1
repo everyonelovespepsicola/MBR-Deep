@@ -154,6 +154,9 @@ del ""{startupLnk}"" >nul 2>&1
 echo Removing Registry Keys...
 reg delete ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MBR-Deep"" /f >nul 2>&1
 
+echo Removing Configuration Files...
+rmdir /s /q ""%LOCALAPPDATA%\MBR-Deep"" >nul 2>&1
+
 echo Removing Installation Directory...
 cd /d ""%TEMP%""
 start /b cmd.exe /c ""ping 127.0.0.1 -n 2 >nul & rmdir /s /q ""{installDir}""""
@@ -176,9 +179,8 @@ start /b cmd.exe /c ""ping 127.0.0.1 -n 2 >nul & rmdir /s /q ""{installDir}""""
                 Console.WriteLine("Launching MBR-Deep...");
                 Thread.Sleep(1000);
 
-                // Launch the UI through explorer.exe so it strips the Installer's Administrator privileges.
-                // This ensures the AppDrawer safely runs as a standard user process as intended!
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
+                // Launch the UI directly. (It will run elevated for this first post-install launch, but standard user via Start Menu thereafter)
+                Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
             }
             catch (Exception ex)
             {

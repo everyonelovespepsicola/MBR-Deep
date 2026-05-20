@@ -29,6 +29,9 @@ MBR-Deep offers two distinct ways to search your system:
 - **Native System Icons:** Extracts and displays real Windows shell icons for files securely on the UI thread.
 - **Live Results:** Streams matches to the UI in real-time as the search progresses.
 - **Explorer Integration:** Right-click context menus to open files, show in Explorer, or use "Open With...".
+- **Hierarchical Tree View:** Toggle seamlessly between flat file lists and nested folder trees in the classic Python UI.
+- **Dynamic Performance Dashboard:** Monitor real-time CPU, GPU, RAM, Disk, and Network telemetry directly from the modern App Drawer.
+- **Custom Transition Animations:** GPU-accelerated HLSL shader effects (Genie, Burn, Explode, Sandstorm, etc.) for premium UI entrances and exits.
 
 ## ⚠️ Prerequisites
 

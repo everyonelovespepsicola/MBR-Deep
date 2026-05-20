@@ -2141,6 +2141,11 @@
                                       HorizontalAlignment="Left"
                                       SelectionChanged="SettingsEffect_SelectionChanged">
                                 <ComboBoxItem Content="Genie"/>
+                                <ComboBoxItem Content="Burn"/>
+                                <ComboBoxItem Content="Beam"/>
+                                <ComboBoxItem Content="Explode"/>
+                                <ComboBoxItem Content="Sandstorm"/>
+                                <ComboBoxItem Content="Plinko"/>
                                 <ComboBoxItem Content="None"
                                               IsSelected="True"/>
                             </ComboBox>
