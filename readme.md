@@ -43,21 +43,25 @@ MBR-Deep offers two distinct ways to search your system:
 
 ## 🚀 Getting Started
 
-The project includes PowerShell automation scripts to make setup seamless.
+The project includes PowerShell automation scripts to build the applications.
 
-### 1. New .NET 10 App Drawer & Background Service
+### 1. Building the .NET 10 App Drawer (Installer)
 
-- **Frontend UI:** Use `.\build_AppDrawer.ps1` to build and launch the modern WPF App Drawer (`MBR-DeepDrawer`).
-- **Backend Service:** Run the `src\BackendService\MBR-DeepService.csproj` project as an Administrator, or install it as a persistent Windows Service.
-- **Production Installer:** Run `.\publish.ps1` to compile the C-Engine, Backend Service, and Frontend UI, and bundle them into a single `MBRDeep_Setup.exe` installer.
-- **Stress Testing:** Run `.\test_publish.ps1` or `.\test_gm_publish.ps1` to execute the rigorous IPC stress and stability test suites.
-
-### 2. Legacy Python App (Development)
-
-Open a PowerShell terminal **as Administrator** and execute the run script:
+To compile the C-Engine, Backend Service, and Frontend UI, and bundle them into a single `MBRDeep_Installer.exe`, run the main publish script from the project root:
 
 ```powershell
-.\run.ps1
+.\publish.ps1
+```
+
+This will create the installer at `dist\MBRDeep_Installer.exe`. This script also compiles the `fast_search.dll` required by the legacy Python app.
+
+### 2. Building the Legacy Python App (Standalone Executable)
+
+After running the main `publish.ps1` script at the project root (which builds the required C-engine), you can package the classic Python application into a single, portable `.exe` file. Run the Python-specific publish script **as Administrator**:
+
+```powershell
+cd src\UI_Python
+.\publish.ps1
 ```
 
 **What this script does:**
