@@ -805,7 +805,8 @@
                     <DataTemplate>
                         <StackPanel Width="120"
                                     Height="110"
-                                    Background="Transparent">
+                                    Background="Transparent"
+                                    ToolTip="{Binding FileName}">
 
                             <StackPanel.ContextMenu>
                                 <ContextMenu>
@@ -832,7 +833,6 @@
                                        TextAlignment="Center"
                                        TextWrapping="Wrap"
                                        MaxHeight="36"
-                                       ToolTip="{Binding FileName}"
                                        TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                     </DataTemplate>

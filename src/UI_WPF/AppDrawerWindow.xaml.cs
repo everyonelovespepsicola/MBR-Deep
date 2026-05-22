@@ -2485,7 +2485,7 @@ namespace MBRDeepDrawer
         {
             var btn = new System.Windows.Controls.Button
             {
-                ToolTip = item.DisplayName,
+                ToolTip = string.IsNullOrEmpty(item.TargetPath) ? item.DisplayName : $"{item.DisplayName}\n{item.TargetPath}",
                 Cursor = System.Windows.Input.Cursors.Hand,
                 Background = System.Windows.Media.Brushes.Transparent,
                 BorderThickness = new Thickness(0),
