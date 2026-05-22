@@ -531,7 +531,7 @@
 
             <Grid.Resources>
                 <Style x:Key="SidebarButtonStyle"
-                        TargetType="Button">
+                       TargetType="Button">
                     <Setter Property="Background"
                             Value="Transparent"/>
                     <Setter Property="Foreground"
@@ -585,7 +585,7 @@
 
             <!-- Ghosted Windows Start Button -->
             <Button Grid.Row="1"
-                    ToolTip="Start Menu"
+                    ToolTip="Windows Start Menu"
                     Cursor="Hand"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
