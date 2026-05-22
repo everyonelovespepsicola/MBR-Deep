@@ -180,6 +180,61 @@ namespace MBRDeepDrawer
             set { SetValue(SidebarIconSizeProperty, value); }
         }
 
+        public static readonly DependencyProperty DrawerItemWidthProperty =
+            DependencyProperty.Register("DrawerItemWidth", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(120.0));
+        public double DrawerItemWidth
+        {
+            get { return (double)GetValue(DrawerItemWidthProperty); }
+            set { SetValue(DrawerItemWidthProperty, value); }
+        }
+
+        public static readonly DependencyProperty DrawerItemHeightProperty =
+            DependencyProperty.Register("DrawerItemHeight", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(110.0));
+        public double DrawerItemHeight
+        {
+            get { return (double)GetValue(DrawerItemHeightProperty); }
+            set { SetValue(DrawerItemHeightProperty, value); }
+        }
+
+        public static readonly DependencyProperty DrawerItemMarginProperty =
+            DependencyProperty.Register("DrawerItemMargin", typeof(Thickness), typeof(AppDrawerWindow), new PropertyMetadata(new Thickness(15, 15, 15, 25)));
+        public Thickness DrawerItemMargin
+        {
+            get { return (Thickness)GetValue(DrawerItemMarginProperty); }
+            set { SetValue(DrawerItemMarginProperty, value); }
+        }
+
+        public static readonly DependencyProperty DrawerItemPaddingProperty =
+            DependencyProperty.Register("DrawerItemPadding", typeof(Thickness), typeof(AppDrawerWindow), new PropertyMetadata(new Thickness(10)));
+        public Thickness DrawerItemPadding
+        {
+            get { return (Thickness)GetValue(DrawerItemPaddingProperty); }
+            set { SetValue(DrawerItemPaddingProperty, value); }
+        }
+
+        public static readonly DependencyProperty SidebarItemSizeProperty =
+            DependencyProperty.Register("SidebarItemSize", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(120.0));
+        public double SidebarItemSize
+        {
+            get { return (double)GetValue(SidebarItemSizeProperty); }
+            set { SetValue(SidebarItemSizeProperty, value); }
+        }
+
+        private void UpdateDrawerItemSizing()
+        {
+            double size = DrawerIconSize;
+            DrawerItemWidth = size + 56.0;
+            DrawerItemHeight = size + 46.0;
+
+            // Calculate a proportional scale relative to the default size of 64
+            double scale = size / 64.0;
+            DrawerItemMargin = new Thickness(15 * scale, 15 * scale, 15 * scale, 25 * scale);
+            DrawerItemPadding = new Thickness(10 * scale);
+
+            // Ensure the Sidebar button hitbox scales seamlessly so massive bouncing icons are never clipped
+            SidebarItemSize = SidebarIconSize + 48.0;
+        }
+
         // --- Focus Management ---
         private System.Windows.Threading.DispatcherTimer? _focusCheckTimer;
         private uint _myPid;
@@ -1163,10 +1218,12 @@ namespace MBRDeepDrawer
             SidebarIconSize = _appSettings.SidebarIconSize;
             UpdateBackgroundColor();
             UpdateFontFamily();
+            UpdateDrawerItemSizing();
 
             _isInitializingSettings = true;
             if (SettingsOpacitySlider != null) SettingsOpacitySlider.Value = _appSettings.BackgroundOpacity;
             if (SettingsSpeedSlider != null) SettingsSpeedSlider.Value = _appSettings.AnimationSpeed;
+            if (SettingsHoverScale != null) SettingsHoverScale.Value = _appSettings.HoverScale;
             if (SettingsDrawerIconSize != null) SettingsDrawerIconSize.Value = _appSettings.DrawerIconSize;
             if (SettingsSidebarIconSize != null) SettingsSidebarIconSize.Value = _appSettings.SidebarIconSize;
             if (SettingsFontBold != null) SettingsFontBold.IsChecked = _appSettings.FontBold;
@@ -2488,9 +2545,7 @@ namespace MBRDeepDrawer
                 ToolTip = string.IsNullOrEmpty(item.TargetPath) ? item.DisplayName : $"{item.DisplayName}\n{item.TargetPath}",
                 Cursor = System.Windows.Input.Cursors.Hand,
                 Background = System.Windows.Media.Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Width = 120,
-                Height = 120
+                BorderThickness = new Thickness(0)
             };
 
             var img = new System.Windows.Controls.Image();
@@ -2579,7 +2634,7 @@ namespace MBRDeepDrawer
             if (SidebarCarouselCanvas == null || SidebarCarouselCanvas.ActualHeight == 0) return;
 
             double centerY = SidebarCarouselCanvas.ActualHeight / 2.0;
-            double verticalSpacing = SidebarIconSize * 1.0;
+            double verticalSpacing = SidebarIconSize * 1.15; // Adds a dynamic 15% gap between icons
 
             int count = _carouselItems.Count;
             if (count == 0) return;
@@ -2848,7 +2903,7 @@ namespace MBRDeepDrawer
                 {
                     double dropY = e.GetPosition(SidebarCarouselCanvas).Y;
                     double centerY = SidebarCarouselCanvas.ActualHeight / 2.0;
-                    double verticalSpacing = SidebarIconSize * 1.0;
+                    double verticalSpacing = SidebarIconSize * 1.15; // Adds a dynamic 15% gap between icons
 
                     // Calculate the theoretical index slot you dropped the item on
                     double dist = (dropY - centerY) / verticalSpacing;
@@ -3334,11 +3389,19 @@ namespace MBRDeepDrawer
             SaveSettings();
         }
 
+        private void SettingsHoverScale_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isInitializingSettings) return;
+            _appSettings.HoverScale = SettingsHoverScale.Value;
+            SaveSettings();
+        }
+
         private void SettingsDrawerIconSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (_isInitializingSettings) return;
             _appSettings.DrawerIconSize = SettingsDrawerIconSize.Value;
             DrawerIconSize = _appSettings.DrawerIconSize;
+            UpdateDrawerItemSizing();
             SaveSettings();
         }
 
@@ -3347,6 +3410,8 @@ namespace MBRDeepDrawer
             if (_isInitializingSettings) return;
             _appSettings.SidebarIconSize = SettingsSidebarIconSize.Value;
             SidebarIconSize = _appSettings.SidebarIconSize;
+            UpdateDrawerItemSizing();
+            UpdateCarousel();
             SaveSettings();
         }
 
@@ -3836,6 +3901,70 @@ namespace MBRDeepDrawer
             if (DetailedGpuGrid.Visibility == Visibility.Visible) DrawGraph(DetailedGpuCanvas, DetailedGpuLine, DetailedGpuShade, _gpuHistory, _historyIndex);
             if (DetailedNetGrid.Visibility == Visibility.Visible) DrawGraph(DetailedNetCanvas, DetailedNetLine, DetailedNetShade, scaledNet, _historyIndex);
         }
+
+        private void Interactive_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Control control)
+            {
+                var target = control.Template?.FindName("HoverBorder", control) as FrameworkElement;
+                if (target != null && target.RenderTransform is System.Windows.Media.ScaleTransform scale)
+                {
+                    // WPF aggressively freezes nameless objects in XAML templates to save memory.
+                    // If the transform is frozen, clone it into a mutable instance before animating!
+                    if (scale.IsFrozen)
+                    {
+                        scale = scale.Clone();
+                        target.RenderTransform = scale;
+                    }
+                    var animX = new System.Windows.Media.Animation.DoubleAnimation
+                    {
+                        To = _appSettings.HoverScale,
+                        Duration = TimeSpan.FromSeconds(0.4),
+                        EasingFunction = new System.Windows.Media.Animation.ElasticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut, Oscillations = 1, Springiness = 4 }
+                    };
+                    var animY = new System.Windows.Media.Animation.DoubleAnimation
+                    {
+                        To = _appSettings.HoverScale,
+                        Duration = TimeSpan.FromSeconds(0.4),
+                        EasingFunction = new System.Windows.Media.Animation.ElasticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut, Oscillations = 1, Springiness = 4 }
+                    };
+                    scale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, animX);
+                    scale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, animY);
+                }
+            }
+        }
+
+        private void Interactive_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Control control)
+            {
+                var target = control.Template?.FindName("HoverBorder", control) as FrameworkElement;
+                if (target != null && target.RenderTransform is System.Windows.Media.ScaleTransform scale)
+                {
+                    // WPF aggressively freezes nameless objects in XAML templates to save memory.
+                    // If the transform is frozen, clone it into a mutable instance before animating!
+                    if (scale.IsFrozen)
+                    {
+                        scale = scale.Clone();
+                        target.RenderTransform = scale;
+                    }
+                    var animX = new System.Windows.Media.Animation.DoubleAnimation
+                    {
+                        To = 1.0,
+                        Duration = TimeSpan.FromSeconds(0.25),
+                        EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    var animY = new System.Windows.Media.Animation.DoubleAnimation
+                    {
+                        To = 1.0,
+                        Duration = TimeSpan.FromSeconds(0.25),
+                        EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                    };
+                    scale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, animX);
+                    scale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, animY);
+                }
+            }
+        }
     }
 
     // Data model for the XAML Binding
@@ -3897,6 +4026,7 @@ namespace MBRDeepDrawer
         public string CustomFontColorHex { get; set; } = "#FFFFFF";
         public string TransitionEffect { get; set; } = "None";
         public double AnimationSpeed { get; set; } = 0.5;
+        public double HoverScale { get; set; } = 1.25;
         public double DrawerIconSize { get; set; } = 64.0;
         public double SidebarIconSize { get; set; } = 72.0;
         public string SortMode { get; set; } = "A-Z";

@@ -483,12 +483,22 @@
                     Value="10,0"/>
             <Setter Property="Cursor"
                     Value="Hand"/>
+            <EventSetter Event="MouseEnter"
+                         Handler="Interactive_MouseEnter"/>
+            <EventSetter Event="MouseLeave"
+                         Handler="Interactive_MouseLeave"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border Background="{TemplateBinding Background}"
+                        <Border x:Name="HoverBorder"
+                                Background="{TemplateBinding Background}"
                                 CornerRadius="20"
-                                Padding="{TemplateBinding Padding}">
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1.0"
+                                                ScaleY="1.0"/>
+                            </Border.RenderTransform>
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center"/>
                         </Border>
@@ -504,6 +514,59 @@
                                      Value="True">
                                 <Setter Property="Foreground"
                                         Value="{DynamicResource PrimaryTextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Reusable Style for the Performance Back Buttons -->
+        <Style x:Key="AnimatedBackButtonStyle"
+               TargetType="Button">
+            <Setter Property="Background"
+                    Value="Transparent"/>
+            <Setter Property="Foreground"
+                    Value="{DynamicResource PrimaryTextBrush}"/>
+            <Setter Property="BorderThickness"
+                    Value="0"/>
+            <Setter Property="Cursor"
+                    Value="Hand"/>
+            <Setter Property="Width"
+                    Value="40"/>
+            <Setter Property="Height"
+                    Value="40"/>
+            <Setter Property="Margin"
+                    Value="0,0,15,0"/>
+            <Setter Property="ToolTip"
+                    Value="Back to Overview"/>
+            <EventSetter Event="MouseEnter"
+                         Handler="Interactive_MouseEnter"/>
+            <EventSetter Event="MouseLeave"
+                         Handler="Interactive_MouseLeave"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="HoverBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="20"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1.0"
+                                                ScaleY="1.0"/>
+                            </Border.RenderTransform>
+                            <TextBlock Text="&#xE72B;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="20"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+                                <Setter Property="Background"
+                                        Value="{DynamicResource ControlHoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -543,18 +606,28 @@
                     <Setter Property="FontFamily"
                             Value="Segoe MDL2 Assets"/>
                     <Setter Property="Width"
-                            Value="120"/>
+                            Value="{Binding SidebarItemSize, RelativeSource={RelativeSource AncestorType=Window}}"/>
                     <Setter Property="Height"
-                            Value="120"/>
+                            Value="{Binding SidebarItemSize, RelativeSource={RelativeSource AncestorType=Window}}"/>
                     <Setter Property="Margin"
                             Value="0,0,0,15"/>
                     <Setter Property="Cursor"
                             Value="Hand"/>
+                    <EventSetter Event="MouseEnter"
+                                 Handler="Interactive_MouseEnter"/>
+                    <EventSetter Event="MouseLeave"
+                                 Handler="Interactive_MouseLeave"/>
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}"
-                                        CornerRadius="12">
+                                <Border x:Name="HoverBorder"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="12"
+                                        RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <ScaleTransform ScaleX="1.0"
+                                                        ScaleY="1.0"/>
+                                    </Border.RenderTransform>
                                     <ContentPresenter HorizontalAlignment="Center"
                                                       VerticalAlignment="Center"/>
                                 </Border>
@@ -590,12 +663,20 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
                     Click="Sidebar_Start_Click"
+                    MouseEnter="Interactive_MouseEnter"
+                    MouseLeave="Interactive_MouseLeave"
                     Margin="0,0,0,15">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <!-- Tighter transparent border reduces the padding around the icon -->
-                        <Border Background="Transparent"
-                                Padding="10">
+                        <Border x:Name="HoverBorder"
+                                Background="Transparent"
+                                Padding="10"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1.0"
+                                                ScaleY="1.0"/>
+                            </Border.RenderTransform>
                             <Path x:Name="GhostPath"
                                   Data="M0,0 H10 V10 H0 Z M12,0 H22 V10 H12 Z M0,12 H10 V22 H0 Z M12,12 H22 V22 H12 Z"
                                   Fill="{DynamicResource PrimaryTextBrush}"
@@ -688,12 +769,20 @@
                         Margin="0,0,20,0"
                         Cursor="Hand"
                         ToolTip="Settings"
-                        Click="BtnOpenSettings_Click">
+                        Click="BtnOpenSettings_Click"
+                        MouseEnter="Interactive_MouseEnter"
+                        MouseLeave="Interactive_MouseLeave">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
-                            <Border Background="{TemplateBinding Background}"
+                            <Border x:Name="HoverBorder"
+                                    Background="{TemplateBinding Background}"
                                     CornerRadius="15"
-                                    Padding="5">
+                                    Padding="5"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Border.RenderTransform>
+                                    <ScaleTransform ScaleX="1.0"
+                                                    ScaleY="1.0"/>
+                                </Border.RenderTransform>
                                 <TextBlock Text="&#xE713;"
                                            FontFamily="Segoe MDL2 Assets"
                                            FontSize="24"
@@ -733,15 +822,21 @@
                         <Setter Property="Background"
                                 Value="Transparent"/>
                         <Setter Property="Margin"
-                                Value="15,15,15,25"/>
+                                Value="{Binding DrawerItemMargin, RelativeSource={RelativeSource AncestorType=Window}}"/>
                         <Setter Property="Padding"
-                                Value="10"/>
+                                Value="{Binding DrawerItemPadding, RelativeSource={RelativeSource AncestorType=Window}}"/>
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border Background="{TemplateBinding Background}"
+                                    <Border x:Name="HoverBorder"
+                                            Background="{TemplateBinding Background}"
                                             CornerRadius="8"
-                                            Padding="{TemplateBinding Padding}">
+                                            Padding="{TemplateBinding Padding}"
+                                            RenderTransformOrigin="0.5,0.5">
+                                        <Border.RenderTransform>
+                                            <ScaleTransform ScaleX="1.0"
+                                                            ScaleY="1.0"/>
+                                        </Border.RenderTransform>
                                         <ContentPresenter/>
                                     </Border>
                                     <ControlTemplate.Triggers>
@@ -765,6 +860,10 @@
                                      Handler="ListBoxItem_PreviewMouseLeftButtonDown"/>
                         <EventSetter Event="PreviewMouseMove"
                                      Handler="ListBoxItem_PreviewMouseMove"/>
+                        <EventSetter Event="MouseEnter"
+                                     Handler="Interactive_MouseEnter"/>
+                        <EventSetter Event="MouseLeave"
+                                     Handler="Interactive_MouseLeave"/>
                     </Style>
                 </ListBox.ItemContainerStyle>
 
@@ -803,8 +902,8 @@
                 <!-- Template for each search result tile -->
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Width="120"
-                                    Height="110"
+                        <StackPanel Width="{Binding DrawerItemWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Height="{Binding DrawerItemHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                                     Background="Transparent"
                                     ToolTip="{Binding FileName}">
 
@@ -932,17 +1031,27 @@
                             BorderThickness="0"
                             Cursor="Hand"
                             ToolTip="Advanced Search"
-                            Click="BtnAdvanced_Click">
+                            Click="BtnAdvanced_Click"
+                            MouseEnter="Interactive_MouseEnter"
+                            MouseLeave="Interactive_MouseLeave">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}"
-                                        CornerRadius="25">
+                                <Border x:Name="HoverBorder"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="25"
+                                        RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <ScaleTransform ScaleX="1.0"
+                                                        ScaleY="1.0"/>
+                                    </Border.RenderTransform>
                                     <TextBlock Text="&#xE712;"
                                                FontFamily="Segoe MDL2 Assets"
                                                FontSize="20"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center"/>
                                 </Border>
+                                <ControlTemplate.Triggers>
+                                </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </Button.Template>
                     </Button>
@@ -1089,14 +1198,24 @@
                                         Foreground="{DynamicResource PrimaryTextBrush}"
                                         BorderThickness="0"
                                         Cursor="Hand"
-                                        Click="AdvBrowseBtn_Click">
+                                        Click="AdvBrowseBtn_Click"
+                                        MouseEnter="Interactive_MouseEnter"
+                                        MouseLeave="Interactive_MouseLeave">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}"
-                                                    CornerRadius="22">
+                                            <Border x:Name="HoverBorder"
+                                                    Background="{TemplateBinding Background}"
+                                                    CornerRadius="22"
+                                                    RenderTransformOrigin="0.5,0.5">
+                                                <Border.RenderTransform>
+                                                    <ScaleTransform ScaleX="1.0"
+                                                                    ScaleY="1.0"/>
+                                                </Border.RenderTransform>
                                                 <ContentPresenter HorizontalAlignment="Center"
                                                                   VerticalAlignment="Center"/>
                                             </Border>
+                                            <ControlTemplate.Triggers>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
@@ -1130,14 +1249,24 @@
                                         FontWeight="SemiBold"
                                         BorderThickness="0"
                                         Cursor="Hand"
-                                        Click="AdvSearchActionBtn_Click">
+                                        Click="AdvSearchActionBtn_Click"
+                                        MouseEnter="Interactive_MouseEnter"
+                                        MouseLeave="Interactive_MouseLeave">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}"
-                                                    CornerRadius="22">
+                                            <Border x:Name="HoverBorder"
+                                                    Background="{TemplateBinding Background}"
+                                                    CornerRadius="22"
+                                                    RenderTransformOrigin="0.5,0.5">
+                                                <Border.RenderTransform>
+                                                    <ScaleTransform ScaleX="1.0"
+                                                                    ScaleY="1.0"/>
+                                                </Border.RenderTransform>
                                                 <ContentPresenter HorizontalAlignment="Center"
                                                                   VerticalAlignment="Center"/>
                                             </Border>
+                                            <ControlTemplate.Triggers>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
@@ -1150,21 +1279,52 @@
                                         BorderThickness="0"
                                         Cursor="Hand"
                                         Click="AdvCloseBtn_Click"
-                                        ToolTip="Return to Basic Search">
+                                        ToolTip="Return to Basic Search"
+                                        MouseEnter="Interactive_MouseEnter"
+                                        MouseLeave="Interactive_MouseLeave">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}"
-                                                    CornerRadius="22">
+                                            <Border x:Name="HoverBorder"
+                                                    Background="{TemplateBinding Background}"
+                                                    CornerRadius="22"
+                                                    RenderTransformOrigin="0.5,0.5">
+                                                <Border.RenderTransform>
+                                                    <ScaleTransform ScaleX="1.0"
+                                                                    ScaleY="1.0"/>
+                                                </Border.RenderTransform>
                                                 <TextBlock Text="&#xE72B;"
                                                            FontFamily="Segoe MDL2 Assets"
                                                            FontSize="18"
                                                            HorizontalAlignment="Center"
                                                            VerticalAlignment="Center"/>
                                             </Border>
+                                            <ControlTemplate.Triggers>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
                             </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Hover Bounce Scale:"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsHoverScale"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="1.0"
+                                    Maximum="2.0"
+                                    Value="1.25"
+                                    TickFrequency="0.05"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsHoverScale_ValueChanged"/>
                         </Grid>
                     </Grid>
                 </Border>
@@ -1454,21 +1614,8 @@
                 <StackPanel Orientation="Horizontal"
                             Margin="10,0,0,10">
                     <Button x:Name="DetailedCpuBackBtn"
-                            ToolTip="Back to Overview"
                             Click="DetailedBackBtn_Click"
-                            Width="40"
-                            Height="40"
-                            Background="Transparent"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,0,15,0">
-                        <TextBlock Text="&#xE72B;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="20"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                    </Button>
+                            Style="{StaticResource AnimatedBackButtonStyle}"/>
                     <TextBlock Text="Logical Processors"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
@@ -1499,21 +1646,8 @@
                 </Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal"
                             Margin="10,0,0,10">
-                    <Button ToolTip="Back to Overview"
-                            Click="DetailedBackBtn_Click"
-                            Width="40"
-                            Height="40"
-                            Background="Transparent"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,0,15,0">
-                        <TextBlock Text="&#xE72B;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="20"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                    </Button>
+                    <Button Click="DetailedBackBtn_Click"
+                            Style="{StaticResource AnimatedBackButtonStyle}"/>
                     <TextBlock Text="Memory"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
@@ -1584,21 +1718,8 @@
                 </Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal"
                             Margin="10,0,0,10">
-                    <Button ToolTip="Back to Overview"
-                            Click="DetailedBackBtn_Click"
-                            Width="40"
-                            Height="40"
-                            Background="Transparent"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,0,15,0">
-                        <TextBlock Text="&#xE72B;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="20"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                    </Button>
+                    <Button Click="DetailedBackBtn_Click"
+                            Style="{StaticResource AnimatedBackButtonStyle}"/>
                     <TextBlock Text="GPU"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
@@ -1669,21 +1790,8 @@
                 </Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal"
                             Margin="10,0,0,10">
-                    <Button ToolTip="Back to Overview"
-                            Click="DetailedBackBtn_Click"
-                            Width="40"
-                            Height="40"
-                            Background="Transparent"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,0,15,0">
-                        <TextBlock Text="&#xE72B;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="20"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                    </Button>
+                    <Button Click="DetailedBackBtn_Click"
+                            Style="{StaticResource AnimatedBackButtonStyle}"/>
                     <TextBlock Text="Disk"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
@@ -1708,21 +1816,8 @@
                 </Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal"
                             Margin="10,0,0,10">
-                    <Button ToolTip="Back to Overview"
-                            Click="DetailedBackBtn_Click"
-                            Width="40"
-                            Height="40"
-                            Background="Transparent"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,0,15,0">
-                        <TextBlock Text="&#xE72B;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="20"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
-                    </Button>
+                    <Button Click="DetailedBackBtn_Click"
+                            Style="{StaticResource AnimatedBackButtonStyle}"/>
                     <TextBlock Text="Network"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
