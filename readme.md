@@ -22,6 +22,8 @@ MBR-Deep offers two distinct ways to search your system:
 
 - **Instant-Summon App Drawer:** Acts as a complete Start Menu overlay, accessible instantly via global hotkeys.
 - **Client-Server Architecture:** A secure background service handles elevated MFT access, allowing the user-facing UI to run instantly without UAC prompts.
+- **Infinite Scrolling Launcher Rail:** A mathematical, sleek sidebar carousel that dynamically scales and centers icons with infinite scrolling and invisible teleportation.
+- **Drag-and-Drop Customization:** Easily reorder, pin, or organize your favorite shortcuts directly within the sidebar.
 - **Ultra-Fast Discovery:** Reads directly from the Windows NTFS Master File Table (MFT) using a low-level C DLL.
 - **Deep Content Search:** Grep through file contents rapidly using multi-threaded execution.
 - **PDF & Archive Support:** Extracts and searches text within PDFs (via `pypdfium2`) and compressed archives.

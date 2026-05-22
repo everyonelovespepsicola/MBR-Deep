@@ -260,7 +260,8 @@ namespace TestInstaller
                 Console.WriteLine("Launching Stress Test Client (Terminal will be visible for 60 seconds)...");
                 string clientExe = Path.Combine(installDir, "Client", "MBR-DeepDrawer.exe");
 
-                Process.Start(new ProcessStartInfo(clientExe) { UseShellExecute = true });
+                // Launch via Explorer to simulate a standard user executing the test
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{clientExe}\"") { UseShellExecute = true });
 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("\nInstallation Complete!");

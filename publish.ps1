@@ -179,8 +179,8 @@ start /b cmd.exe /c ""ping 127.0.0.1 -n 2 >nul & rmdir /s /q ""{installDir}""""
                 Console.WriteLine("Launching MBR-Deep...");
                 Thread.Sleep(1000);
 
-                // Launch the UI directly. (It will run elevated for this first post-install launch, but standard user via Start Menu thereafter)
-                Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+                // Launch the UI via Explorer to drop Admin privileges and run as the standard logged-in user
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
             }
             catch (Exception ex)
             {

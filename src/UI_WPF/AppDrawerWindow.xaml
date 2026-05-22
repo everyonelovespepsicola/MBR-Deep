@@ -521,20 +521,17 @@
 
         <!-- Left Sidebar Navigation Strip -->
         <Grid Grid.Column="0"
-              Margin="0,0,40,0">
+              Margin="0,0,40,0"
+              Width="120">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
-                <!-- Top flexible space -->
                 <RowDefinition Height="Auto"/>
-                <!-- Main Icons -->
-                <RowDefinition Height="*"/>
-                <!-- Bottom space (Start Button) -->
                 <RowDefinition Height="Auto"/>
-                <!-- Power Buttons -->
             </Grid.RowDefinitions>
 
             <Grid.Resources>
-                <Style TargetType="Button">
+                <Style x:Key="SidebarButtonStyle"
+                        TargetType="Button">
                     <Setter Property="Background"
                             Value="Transparent"/>
                     <Setter Property="Foreground"
@@ -576,89 +573,24 @@
                 </Style>
             </Grid.Resources>
 
-            <StackPanel Grid.Row="1"
-                        VerticalAlignment="Center"
-                        DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
-
-                <Button ToolTip="This PC"
-                        Click="Sidebar_Computer_Click">
-                    <Image Source="{Binding IconThisPC}"
-                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                    <Button.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Open"
-                                      Click="Sidebar_Computer_Click"/>
-                            <MenuItem Header="Manage"
-                                      Click="Sidebar_Computer_Manage_Click"/>
-                            <Separator/>
-                            <MenuItem Header="Classic"
-                                      Click="Sidebar_Computer_Classic_Click"/>
-                            <MenuItem Header="Properties"
-                                      Click="Sidebar_Computer_Properties_Click"/>
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
-                <Button ToolTip="Control Panel"
-                        Click="Sidebar_ControlPanel_Click">
-                    <Image Source="{Binding IconControlPanel}"
-                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                    <Button.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Open"
-                                      Click="Sidebar_ControlPanel_Click"/>
-                            <Separator/>
-                            <MenuItem Header="Network Center"
-                                      Click="Sidebar_ControlPanel_Network_Click"/>
-                            <MenuItem Header="Mouse"
-                                      Click="Sidebar_ControlPanel_Mouse_Click"/>
-                            <MenuItem Header="Power Options"
-                                      Click="Sidebar_ControlPanel_Power_Click"/>
-                            <MenuItem Header="Programs and Features"
-                                      Click="Sidebar_ControlPanel_Programs_Click"/>
-                            <MenuItem Header="Sound"
-                                      Click="Sidebar_ControlPanel_Sound_Click"/>
-                            <MenuItem Header="User Accounts"
-                                      Click="Sidebar_ControlPanel_Users_Click"/>
-                            <Separator/>
-                            <MenuItem Header="System-Tasks"
-                                      Click="Sidebar_ControlPanel_GodMode_Click"/>
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
-                <Button ToolTip="Devices and Printers"
-                        Click="Sidebar_Devices_Click">
-                    <Image Source="{Binding IconDevices}"
-                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Button>
-                <Button ToolTip="Default Apps"
-                        Click="Sidebar_DefaultApps_Click">
-                    <Image Source="{Binding IconDefaultApps}"
-                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Button>
-                <Button ToolTip="Task Manager"
-                        Click="Sidebar_Performance_Click">
-                    <Image Source="{Binding IconPerformance}"
-                           Width="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Height="{Binding SidebarIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Button>
-            </StackPanel>
+            <Canvas x:Name="SidebarCarouselCanvas"
+                    Grid.Row="0"
+                    Background="Transparent"
+                    MouseWheel="SidebarCarousel_MouseWheel"
+                    AllowDrop="True"
+                    Drop="SidebarCarousel_Drop"
+                    DragEnter="SidebarCarousel_DragEnter"
+                    SizeChanged="SidebarCarouselCanvas_SizeChanged"
+                    Margin="0,10,0,10"/>
 
             <!-- Ghosted Windows Start Button -->
-            <Button Grid.Row="2"
+            <Button Grid.Row="1"
                     ToolTip="Start Menu"
                     Cursor="Hand"
                     HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Click="Sidebar_Start_Click">
+                    VerticalAlignment="Top"
+                    Click="Sidebar_Start_Click"
+                    Margin="0,0,0,15">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <!-- Tighter transparent border reduces the padding around the icon -->
@@ -685,12 +617,13 @@
             </Button>
 
             <!-- Power Controls at Bottom Left -->
-            <StackPanel Grid.Row="3"
+            <StackPanel Grid.Row="2"
                         Orientation="Horizontal"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Bottom"
                         Margin="0,0,0,-10">
                 <Button Content="&#xE7E8;"
+                        Style="{StaticResource SidebarButtonStyle}"
                         ToolTip="Power Options"
                         Click="Sidebar_Power_Click"
                         Width="45"
@@ -828,6 +761,10 @@
                         </Setter>
                         <EventSetter Event="MouseLeftButtonUp"
                                      Handler="ListBoxItem_MouseLeftButtonUp"/>
+                        <EventSetter Event="PreviewMouseLeftButtonDown"
+                                     Handler="ListBoxItem_PreviewMouseLeftButtonDown"/>
+                        <EventSetter Event="PreviewMouseMove"
+                                     Handler="ListBoxItem_PreviewMouseMove"/>
                     </Style>
                 </ListBox.ItemContainerStyle>
 
@@ -879,6 +816,8 @@
                                     <MenuItem Header="Open File Location"
                                               Click="MenuItem_OpenLocation_Click"/>
                                     <Separator/>
+                                    <MenuItem Header="Send to Desktop (Create Shortcut)"
+                                              Click="MenuItem_SendToDesktop_Click"/>
                                     <MenuItem Header="Copy Path"
                                               Click="MenuItem_CopyPath_Click"/>
                                 </ContextMenu>

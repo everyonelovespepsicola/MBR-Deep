@@ -87,6 +87,7 @@ namespace MBRDeep.BackendService
 
         private async Task TelemetryServerAsync(CancellationToken stoppingToken)
         {
+            int backoffDelay = 10;
             while (!stoppingToken.IsCancellationRequested)
             {
                 NamedPipeServerStream? pipeServer = null;
@@ -101,11 +102,48 @@ namespace MBRDeep.BackendService
 
                     await pipeServer.WaitForConnectionAsync(stoppingToken);
 
+                    if (!pipeServer.IsConnected)
+                    {
+                        pipeServer.Dispose();
+                        continue;
+                    }
+
+                    if (GetNamedPipeClientProcessId(pipeServer.SafePipeHandle, out uint clientProcessId))
+                    {
+                        try
+                        {
+                            using var clientProcess = Process.GetProcessById((int)clientProcessId);
+                            string? exeName = clientProcess.ProcessName;
+                            string? exePath = clientProcess.MainModule?.FileName;
+
+                            bool isAuthorized = false;
+                            if (string.Equals(exeName, "dotnet", StringComparison.OrdinalIgnoreCase)) isAuthorized = true;
+                            else if (exeName != null && exeName.Contains("MBR-Deep", StringComparison.OrdinalIgnoreCase) &&
+                                     exePath != null && exePath.Contains("MBR-Deep", StringComparison.OrdinalIgnoreCase))
+                            {
+                                isAuthorized = true;
+                            }
+
+                            if (!isAuthorized)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
+                                Console.WriteLine($"[SECURITY] Blocked unauthorized Telemetry connection from {exePath} (PID: {clientProcessId})");
+                                Console.ResetColor();
+                                pipeServer.Dispose();
+                                continue;
+                            }
+                        }
+                        catch { pipeServer.Dispose(); continue; }
+                    }
+                    else { pipeServer.Dispose(); continue; }
+
                     // UI Connected! Wake up the Ring-0 hardware driver
                     computer = new Computer { IsCpuEnabled = true, IsGpuEnabled = true };
                     computer.Open();
 
                     using var writer = new StreamWriter(pipeServer, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                    backoffDelay = 10;
 
                     while (pipeServer.IsConnected && !stoppingToken.IsCancellationRequested)
                     {
@@ -162,7 +200,12 @@ namespace MBRDeep.BackendService
                         await Task.Delay(1000, stoppingToken);
                     }
                 }
-                catch (Exception) { /* If the UI closes or the pipe breaks, it throws here */ }
+                catch (OperationCanceledException) { break; }
+                catch (Exception)
+                {
+                    await Task.Delay(backoffDelay, stoppingToken).ContinueWith(_ => { });
+                    backoffDelay = Math.Min(backoffDelay * 2, 1000);
+                }
                 finally
                 {
                     // Safely put the driver back to sleep (0.0% CPU) when the UI disconnects
@@ -178,9 +221,9 @@ namespace MBRDeep.BackendService
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("Building Global MFT Cache in RAM for instant keystroke searches...");
-            foreach (var drive in DriveInfo.GetDrives())
+            Parallel.ForEach(DriveInfo.GetDrives(), drive =>
             {
-                if (drive.IsReady)
+                if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
                 {
                     try
                     {
@@ -205,7 +248,7 @@ namespace MBRDeep.BackendService
                         Console.ResetColor();
                     }
                 }
-            }
+            });
             Console.ResetColor();
 
             // Start the On-Demand Hardware Telemetry Server in the background
@@ -397,7 +440,22 @@ namespace MBRDeep.BackendService
                                 {
                                     if (scanToken.IsCancellationRequested || !pipeServer.IsConnected) { driveState.Stop(); return; }
 
-                                    if (_globalMftCache.TryGetValue(d, out var mftTable))
+                                    if (!_globalMftCache.TryGetValue(d, out var mftTable))
+                                    {
+                                        lock (_globalMftCache)
+                                        {
+                                            if (!_globalMftCache.TryGetValue(d, out mftTable))
+                                            {
+                                                mftTable = new System.Collections.Generic.Dictionary<ulong, (ulong parentId, string fileName)>();
+                                                FileFoundCallback callback = (fileId, parentId, fileName) => { mftTable[fileId] = (parentId, fileName); return true; };
+                                                ScanDriveWithCallback(d, callback);
+                                                GC.KeepAlive(callback);
+                                                _globalMftCache[d] = mftTable;
+                                            }
+                                        }
+                                    }
+
+                                    if (mftTable.Count > 0)
                                     {
                                         var foundFiles = new System.Collections.Generic.List<ulong>();
                                         StringComparison comp = request.AdvCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
@@ -411,8 +469,8 @@ namespace MBRDeep.BackendService
                                                 if (!string.IsNullOrEmpty(request.BasicQuery) && entry.Value.fileName != null && entry.Value.fileName.Contains(request.BasicQuery, StringComparison.OrdinalIgnoreCase))
                                                 {
                                                     foundFiles.Add(entry.Key);
-                                                    // Massive Optimization: Stop filling RAM with millions of basic matches since the UI only displays 100 anyway!
-                                                    if (foundFiles.Count >= 200) break;
+                                                    // Massive Optimization: Stop filling RAM with millions of basic matches since the UI only displays 500 anyway!
+                                                    if (foundFiles.Count >= 1000) break;
                                                 }
                                             }
                                             else
@@ -478,7 +536,7 @@ namespace MBRDeep.BackendService
                                                 }
 
                                                 // Prevent choking the Named Pipe / UI with massive result streams
-                                                if (++basicMatchCount >= 200) break;
+                                                if (++basicMatchCount >= 1000) break;
                                             }
                                         }
                                         else

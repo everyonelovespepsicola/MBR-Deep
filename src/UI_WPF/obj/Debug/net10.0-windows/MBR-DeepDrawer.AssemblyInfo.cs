@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MBR-DeepDrawer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f3de3f739bcb8b2ba3df97dc5aca4df86d8c98ad")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d486ee0c7bf24dcd8c8e554108e346f654c91603")]
 [assembly: System.Reflection.AssemblyProductAttribute("MBR-DeepDrawer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MBR-DeepDrawer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -155,6 +155,15 @@ namespace MBRDeepDrawer
         private string _settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "config.json");
         private bool _isInitializingSettings = true;
 
+        // --- Sidebar Carousel State ---
+        private List<SidebarItem> _carouselItems = new List<SidebarItem>();
+        private double _currentWheelAngle = 0;
+        private double _targetWheelAngle = 0;
+        private double _wheelVelocity = 0;
+        private bool _isWheelAnimating = false;
+        private string _pinnedItemsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MBR-Deep", "pinned_sidebar.json");
+        private System.Windows.Point _dragStartPoint;
+
         public static readonly DependencyProperty DrawerIconSizeProperty =
             DependencyProperty.Register("DrawerIconSize", typeof(double), typeof(AppDrawerWindow), new PropertyMetadata(64.0));
         public double DrawerIconSize
@@ -219,6 +228,7 @@ namespace MBRDeepDrawer
         private DateTime _lastOpened = DateTime.MinValue;
         private bool _isAdvSearching = false;
         private bool _hasGainedFocusSinceOpen = false;
+        private bool _isDialogActive = false;
 
         public ImageSource? IconThisPC { get; set; }
         public ImageSource? IconControlPanel { get; set; }
@@ -423,6 +433,16 @@ namespace MBRDeepDrawer
 
             _lastOpened = DateTime.Now;
             _hasGainedFocusSinceOpen = false;
+
+            // Always reset the wheel so the user's main icons are laid out perfectly from top to bottom.
+            // (count - 1) / 2.0 naturally centers the list and handles even/odd teleportation offsets automatically.
+            int count = _carouselItems.Count;
+            if (count > 0)
+            {
+                _targetWheelAngle = (count - 1) / 2.0;
+                _currentWheelAngle = _targetWheelAngle;
+            }
+            UpdateCarousel();
 
             if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
             {
@@ -774,6 +794,7 @@ namespace MBRDeepDrawer
             AlignUIElements();
             SetupDarkContextMenus();
             LoadSidebarIcons();
+            InitializeCarousel();
             SearchResults = new ObservableCollection<SearchResult>();
 
             _myPid = (uint)Process.GetCurrentProcess().Id;
@@ -790,6 +811,8 @@ namespace MBRDeepDrawer
 
                     if (fgHwnd != targetHwnd && fgHwnd != IntPtr.Zero)
                     {
+                        if (_isDialogActive) return;
+
                         GetWindowThreadProcessId(fgHwnd, out uint fgPid);
 
                         if (fgPid != _myPid)
@@ -825,37 +848,7 @@ namespace MBRDeepDrawer
             cvs.GroupDescriptions.Add(new PropertyGroupDescription("Category"));
             ResultsList.ItemsSource = cvs.View;
 
-            // Populate Drive RadioButtons
-            var rbAll = new System.Windows.Controls.RadioButton
-            {
-                Content = "All",
-                GroupName = "AdvDriveGroup",
-                IsChecked = true,
-                FontSize = 16,
-                Margin = new Thickness(0, 0, 15, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                VerticalContentAlignment = VerticalAlignment.Center
-            };
-            rbAll.Checked += AdvDrive_Checked;
-            AdvDrivePanel.Children.Add(rbAll);
-
-            foreach (var drive in System.IO.DriveInfo.GetDrives())
-            {
-                if (drive.IsReady)
-                {
-                    var rb = new System.Windows.Controls.RadioButton
-                    {
-                        Content = drive.Name.Substring(0, 1),
-                        GroupName = "AdvDriveGroup",
-                        FontSize = 16,
-                        Margin = new Thickness(0, 0, 15, 0),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        VerticalContentAlignment = VerticalAlignment.Center
-                    };
-                    rb.Checked += AdvDrive_Checked;
-                    AdvDrivePanel.Children.Add(rb);
-                }
-            }
+            RefreshDriveList();
 
             LoadRecents();
             LoadSettings();
@@ -911,6 +904,7 @@ namespace MBRDeepDrawer
             // 2. Hide the window when it loses focus (like a true native overlay)
             this.Deactivated += (s, e) =>
             {
+                if (_isDialogActive) return;
                 _lastDeactivated = DateTime.Now;
                 HideDrawer();
             };
@@ -920,6 +914,8 @@ namespace MBRDeepDrawer
             {
                 if (this.IsVisible)
                 {
+                    RefreshDriveList();
+
                     // Force the taskbar to appear over any borderless fullscreen games
                     SetTaskbarTopmost(true);
 
@@ -1002,6 +998,75 @@ namespace MBRDeepDrawer
                 }));
             };
             InstallSystemHooks(_toggleCallback);
+        }
+
+        private void RefreshDriveList()
+        {
+            if (AdvDrivePanel == null) return;
+
+            string selectedDrive = _appSettings.AdvDrive ?? "All";
+
+            bool wasInitializing = _isInitializingSettings;
+            _isInitializingSettings = true;
+
+            foreach (var child in AdvDrivePanel.Children)
+            {
+                if (child is System.Windows.Controls.RadioButton rbc)
+                {
+                    rbc.Checked -= AdvDrive_Checked;
+                }
+            }
+            AdvDrivePanel.Children.Clear();
+
+            var rbAll = new System.Windows.Controls.RadioButton
+            {
+                Content = "All",
+                GroupName = "AdvDriveGroup",
+                IsChecked = (selectedDrive == "All"),
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 15, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            rbAll.Checked += AdvDrive_Checked;
+            AdvDrivePanel.Children.Add(rbAll);
+
+            bool foundSelected = (selectedDrive == "All");
+
+            foreach (var drive in System.IO.DriveInfo.GetDrives())
+            {
+                if (drive.IsReady)
+                {
+                    string driveLetter = drive.Name.Substring(0, 1);
+                    bool isSelected = (driveLetter == selectedDrive);
+                    if (isSelected) foundSelected = true;
+
+                    var rb = new System.Windows.Controls.RadioButton
+                    {
+                        Content = driveLetter,
+                        GroupName = "AdvDriveGroup",
+                        IsChecked = isSelected,
+                        FontSize = 16,
+                        Margin = new Thickness(0, 0, 15, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        VerticalContentAlignment = VerticalAlignment.Center
+                    };
+                    rb.Checked += AdvDrive_Checked;
+                    AdvDrivePanel.Children.Add(rb);
+                }
+            }
+
+            if (!foundSelected)
+            {
+                rbAll.IsChecked = true;
+                _appSettings.AdvDrive = "All";
+            }
+
+            _isInitializingSettings = wasInitializing;
+            if (!foundSelected && !_isInitializingSettings)
+            {
+                SaveSettings();
+            }
         }
 
         private void AlignUIElements()
@@ -1924,7 +1989,7 @@ namespace MBRDeepDrawer
                             // Awaiting this safely syncs the background loop with the UI render speed
                             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                             {
-                                if (SearchResults.Count < 100)
+                                if (SearchResults.Count < 500)
                                 {
                                     // BUGFIX: Extracting shell icons MUST be done on the UI (STA) thread!
                                     // Calling SHGetFileInfo from an MTA background thread causes a fatal Access Violation (Terminal Crash)
@@ -1942,6 +2007,43 @@ namespace MBRDeepDrawer
                                 }
                             });
                         }
+
+                        var resultsToUpdate = SearchResults.ToList();
+                        await Task.Run(() =>
+                        {
+                            int threadCount = Math.Min(Environment.ProcessorCount, 4);
+                            var queue = new System.Collections.Concurrent.ConcurrentQueue<SearchResult>(resultsToUpdate);
+                            var threads = new List<Thread>();
+
+                            for (int i = 0; i < threadCount; i++)
+                            {
+                                var staThread = new Thread(() =>
+                                {
+                                    while (queue.TryDequeue(out var res))
+                                    {
+                                        if (token.IsCancellationRequested) break;
+                                        string ext = Path.GetExtension(res.FileName ?? "");
+                                        if (ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) || ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            var specificIcon = GetSpecificFileIcon(res.FileName!);
+                                            if (specificIcon != null)
+                                            {
+                                                System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                                {
+                                                    if (!token.IsCancellationRequested) res.Icon = specificIcon;
+                                                }, System.Windows.Threading.DispatcherPriority.Background);
+                                            }
+                                        }
+                                    }
+                                });
+                                staThread.SetApartmentState(ApartmentState.STA);
+                                staThread.IsBackground = true;
+                                staThread.Start();
+                                threads.Add(staThread);
+                            }
+
+                            foreach (var t in threads) t.Join();
+                        }, token);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1980,32 +2082,59 @@ namespace MBRDeepDrawer
         {
             AdvancedPanel.Visibility = Visibility.Collapsed;
             BasicSearchPanel.Visibility = Visibility.Visible;
+
+            if (string.IsNullOrEmpty(SearchBox.Text))
+            {
+                if (TabSettings.IsChecked == true)
+                {
+                    SortMode_Changed(this, new RoutedEventArgs());
+                }
+                else
+                {
+                    ShowDefaultApps();
+                }
+            }
+            else
+            {
+                SearchBox.Clear();
+            }
+
             SearchBox.Focus();
         }
 
         private void AdvBrowseBtn_Click(object sender, RoutedEventArgs e)
         {
-            using var dialog = new System.Windows.Forms.FolderBrowserDialog
+            _isDialogActive = true;
+            try
             {
-                Description = "Select Folder to Search",
-                UseDescriptionForTitle = true,
-                ShowNewFolderButton = false
-            };
-
-            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-            {
-                AdvLocation.Text = dialog.SelectedPath;
-
-                // Optionally set the drive radio button to match the selected folder's drive automatically
-                string driveLetter = Path.GetPathRoot(dialog.SelectedPath)?.Substring(0, 1).ToUpper() ?? "";
-                foreach (var child in AdvDrivePanel.Children)
+                using var dialog = new System.Windows.Forms.FolderBrowserDialog
                 {
-                    if (child is System.Windows.Controls.RadioButton rb && rb.Content.ToString() == driveLetter)
+                    Description = "Select Folder to Search",
+                    UseDescriptionForTitle = true,
+                    ShowNewFolderButton = false
+                };
+
+                var helper = new WindowInteropHelper(this);
+                if (dialog.ShowDialog(new NativeWindowWrapper(helper.Handle)) == System.Windows.Forms.DialogResult.OK)
+                {
+                    AdvLocation.Text = dialog.SelectedPath;
+
+                    // Optionally set the drive radio button to match the selected folder's drive automatically
+                    string driveLetter = Path.GetPathRoot(dialog.SelectedPath)?.Substring(0, 1).ToUpper() ?? "";
+                    foreach (var child in AdvDrivePanel.Children)
                     {
-                        rb.IsChecked = true;
-                        break;
+                        if (child is System.Windows.Controls.RadioButton rb && rb.Content.ToString() == driveLetter)
+                        {
+                            rb.IsChecked = true;
+                            break;
+                        }
                     }
                 }
+            }
+            finally
+            {
+                _isDialogActive = false;
+                ForceForeground();
             }
         }
 
@@ -2120,6 +2249,43 @@ namespace MBRDeepDrawer
                                 }
                             });
                         }
+
+                        var resultsToUpdate = SearchResults.ToList();
+                        await Task.Run(() =>
+                        {
+                            int threadCount = Math.Min(Environment.ProcessorCount, 4);
+                            var queue = new System.Collections.Concurrent.ConcurrentQueue<SearchResult>(resultsToUpdate);
+                            var threads = new List<Thread>();
+
+                            for (int i = 0; i < threadCount; i++)
+                            {
+                                var staThread = new Thread(() =>
+                                {
+                                    while (queue.TryDequeue(out var res))
+                                    {
+                                        if (token.IsCancellationRequested) break;
+                                        string ext = Path.GetExtension(res.FileName ?? "");
+                                        if (ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) || ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            var specificIcon = GetSpecificFileIcon(res.FileName!);
+                                            if (specificIcon != null)
+                                            {
+                                                System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                                {
+                                                    if (!token.IsCancellationRequested) res.Icon = specificIcon;
+                                                }, System.Windows.Threading.DispatcherPriority.Background);
+                                            }
+                                        }
+                                    }
+                                });
+                                staThread.SetApartmentState(ApartmentState.STA);
+                                staThread.IsBackground = true;
+                                staThread.Start();
+                                threads.Add(staThread);
+                            }
+
+                            foreach (var t in threads) t.Join();
+                        }, token);
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex)
@@ -2236,6 +2402,481 @@ namespace MBRDeepDrawer
             }
         }
 
+        // --- Infinite 3D Sidebar Carousel & Drag-to-Pin ---
+
+        private void InitializeCarousel()
+        {
+            _carouselItems.Clear();
+            SidebarCarouselCanvas.Children.Clear();
+
+            // 1. This PC
+            var thisPc = new SidebarItem { DisplayName = "This PC", NativeAction = () => Sidebar_Computer_Click(this, new RoutedEventArgs()), Icon = IconThisPC };
+            var ctxThisPc = new System.Windows.Controls.ContextMenu();
+            ctxThisPc.Items.Add(CreateMenuItem("Open", Sidebar_Computer_Click));
+            ctxThisPc.Items.Add(CreateMenuItem("Manage", Sidebar_Computer_Manage_Click));
+            ctxThisPc.Items.Add(new System.Windows.Controls.Separator());
+            ctxThisPc.Items.Add(CreateMenuItem("Classic", Sidebar_Computer_Classic_Click));
+            ctxThisPc.Items.Add(CreateMenuItem("Properties", Sidebar_Computer_Properties_Click));
+            thisPc.ContextMenu = ctxThisPc;
+            _carouselItems.Add(thisPc);
+
+            // 2. Control Panel
+            var cp = new SidebarItem { DisplayName = "Control Panel", NativeAction = () => Sidebar_ControlPanel_Click(this, new RoutedEventArgs()), Icon = IconControlPanel };
+            var ctxCp = new System.Windows.Controls.ContextMenu();
+            ctxCp.Items.Add(CreateMenuItem("Open", Sidebar_ControlPanel_Click));
+            ctxCp.Items.Add(new System.Windows.Controls.Separator());
+            ctxCp.Items.Add(CreateMenuItem("Network Center", Sidebar_ControlPanel_Network_Click));
+            ctxCp.Items.Add(CreateMenuItem("Mouse", Sidebar_ControlPanel_Mouse_Click));
+            ctxCp.Items.Add(CreateMenuItem("Power Options", Sidebar_ControlPanel_Power_Click));
+            ctxCp.Items.Add(CreateMenuItem("Programs and Features", Sidebar_ControlPanel_Programs_Click));
+            ctxCp.Items.Add(CreateMenuItem("Sound", Sidebar_ControlPanel_Sound_Click));
+            ctxCp.Items.Add(CreateMenuItem("User Accounts", Sidebar_ControlPanel_Users_Click));
+            ctxCp.Items.Add(new System.Windows.Controls.Separator());
+            ctxCp.Items.Add(CreateMenuItem("System-Tasks", Sidebar_ControlPanel_GodMode_Click));
+            cp.ContextMenu = ctxCp;
+            _carouselItems.Add(cp);
+
+            // 3. Devices
+            var dev = new SidebarItem { DisplayName = "Devices and Printers", NativeAction = () => Sidebar_Devices_Click(this, new RoutedEventArgs()), Icon = IconDevices };
+            var ctxDev = new System.Windows.Controls.ContextMenu();
+            ctxDev.Items.Add(CreateMenuItem("Open", Sidebar_Devices_Click));
+            ctxDev.Items.Add(CreateMenuItem("Device Manager", Sidebar_DeviceManager_Click));
+            dev.ContextMenu = ctxDev;
+            _carouselItems.Add(dev);
+
+            // 4. Default Apps
+            var defApps = new SidebarItem { DisplayName = "Default Apps", NativeAction = () => Sidebar_DefaultApps_Click(this, new RoutedEventArgs()), Icon = IconDefaultApps };
+            var ctxDefApps = new System.Windows.Controls.ContextMenu();
+            ctxDefApps.Items.Add(CreateMenuItem("Open", Sidebar_DefaultApps_Click));
+            ctxDefApps.Items.Add(CreateMenuItem("Apps and Features", Sidebar_AppsAndFeatures_Click));
+            defApps.ContextMenu = ctxDefApps;
+            _carouselItems.Add(defApps);
+
+            // 5. Performance
+            var perf = new SidebarItem { DisplayName = "Task Manager", NativeAction = () => Sidebar_Performance_Click(this, new RoutedEventArgs()), Icon = IconPerformance };
+            var ctxPerf = new System.Windows.Controls.ContextMenu();
+            ctxPerf.Items.Add(CreateMenuItem("Open", Sidebar_Performance_Click));
+            ctxPerf.Items.Add(CreateMenuItem("Resource Monitor", Sidebar_ResourceMonitor_Click));
+            perf.ContextMenu = ctxPerf;
+            _carouselItems.Add(perf);
+
+            LoadPinnedCarouselItems();
+
+            foreach (var item in _carouselItems) AddCarouselUIElement(item);
+
+            int count = _carouselItems.Count;
+            if (count > 0)
+            {
+                _targetWheelAngle = (count - 1) / 2.0;
+                _currentWheelAngle = _targetWheelAngle;
+            }
+
+            UpdateCarousel();
+        }
+
+        private System.Windows.Controls.MenuItem CreateMenuItem(string header, RoutedEventHandler handler)
+        {
+            var mi = new System.Windows.Controls.MenuItem { Header = header };
+            mi.Click += handler;
+            return mi;
+        }
+
+        private void AddCarouselUIElement(SidebarItem item)
+        {
+            var btn = new System.Windows.Controls.Button
+            {
+                ToolTip = item.DisplayName,
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Width = 120,
+                Height = 120
+            };
+
+            var img = new System.Windows.Controls.Image();
+            img.Source = item.Icon;
+            // Dynamically bind to the Settings Slider so icons resize in real-time
+            img.SetBinding(System.Windows.Controls.Image.WidthProperty, new System.Windows.Data.Binding("SidebarIconSize") { Source = this });
+            img.SetBinding(System.Windows.Controls.Image.HeightProperty, new System.Windows.Data.Binding("SidebarIconSize") { Source = this });
+            System.Windows.Media.RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+
+            btn.Content = img;
+            btn.SetResourceReference(FrameworkElement.StyleProperty, "SidebarButtonStyle");
+
+            System.Windows.Point dragStartPoint = new System.Windows.Point(-1, -1);
+            btn.PreviewMouseLeftButtonDown += (s, e) =>
+            {
+                dragStartPoint = e.GetPosition(null);
+            };
+
+            btn.PreviewMouseMove += (s, e) =>
+            {
+                if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed && dragStartPoint.X != -1 && dragStartPoint.Y != -1)
+                {
+                    System.Windows.Point position = e.GetPosition(null);
+                    if (Math.Abs(position.X - dragStartPoint.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                        Math.Abs(position.Y - dragStartPoint.Y) > SystemParameters.MinimumVerticalDragDistance)
+                    {
+                        var data = new System.Windows.DataObject("SidebarItem", item);
+                        System.Windows.DragDrop.DoDragDrop(btn, data, System.Windows.DragDropEffects.Move);
+                        dragStartPoint = new System.Windows.Point(-1, -1);
+                    }
+                }
+            };
+
+            btn.Click += (s, e) =>
+            {
+                if (item.NativeAction != null)
+                {
+                    item.NativeAction();
+                }
+                else if (!string.IsNullOrEmpty(item.TargetPath))
+                {
+                    OpenResult(new SearchResult { FileName = item.TargetPath, DisplayName = item.DisplayName });
+                }
+            };
+
+            if (item.ContextMenu != null)
+            {
+                btn.ContextMenu = item.ContextMenu;
+            }
+            else if (!string.IsNullOrEmpty(item.TargetPath))
+            {
+                var ctx = new System.Windows.Controls.ContextMenu();
+                var unpin = new System.Windows.Controls.MenuItem { Header = "Unpin from Sidebar" };
+                unpin.Click += (s, e) =>
+                {
+                    _carouselItems.Remove(item);
+                    SidebarCarouselCanvas.Children.Remove(btn);
+                    SavePinnedCarouselItems();
+
+                    if (_carouselItems.Count < 5)
+                    {
+                        if (_targetWheelAngle < 0) _targetWheelAngle = 0;
+                        if (_targetWheelAngle > _carouselItems.Count - 1) _targetWheelAngle = Math.Max(0, _carouselItems.Count - 1);
+                    }
+
+                    if (!_isWheelAnimating)
+                    {
+                        _isWheelAnimating = true;
+                        System.Windows.Media.CompositionTarget.Rendering += CarouselAnimationLoop;
+                    }
+
+                    UpdateCarousel();
+                };
+                ctx.Items.Add(unpin);
+                ctx.SetResourceReference(FrameworkElement.StyleProperty, typeof(System.Windows.Controls.ContextMenu));
+                btn.ContextMenu = ctx;
+            }
+
+            SidebarCarouselCanvas.Children.Add(btn);
+            item.UIElement = btn;
+            btn.UpdateLayout();
+        }
+
+        private void UpdateCarousel()
+        {
+            if (SidebarCarouselCanvas == null || SidebarCarouselCanvas.ActualHeight == 0) return;
+
+            double centerY = SidebarCarouselCanvas.ActualHeight / 2.0;
+            double verticalSpacing = SidebarIconSize * 1.0;
+
+            int count = _carouselItems.Count;
+            if (count == 0) return;
+
+            double halfCount = count / 2.0;
+
+            for (int i = 0; i < count; i++)
+            {
+                var item = _carouselItems[i];
+                var fe = item.UIElement as FrameworkElement;
+                if (fe == null) continue;
+
+                double itemWidth = double.IsNaN(fe.Width) ? fe.ActualWidth : fe.Width;
+                double itemHeight = double.IsNaN(fe.Height) ? fe.ActualHeight : fe.Height;
+                if (itemWidth == 0 || itemHeight == 0) continue;
+
+                // Calculate distance from the current center item, with wrapping for infinite scroll
+                double dist = i - _currentWheelAngle;
+                if (count >= 5)
+                {
+                    dist = (dist % count + count) % count;
+                    if (dist > count / 2.0) dist -= count;
+                }
+
+                // Y position is a simple vertical stack centered on the current item
+                double y = centerY + dist * verticalSpacing;
+
+                // All icons are aligned to the same X coordinate
+                double x = (SidebarCarouselCanvas.ActualWidth / 2.0) - (itemWidth / 2.0);
+
+                // Scale and Opacity based on distance from the center
+                double absDist = Math.Abs(dist);
+
+                double fadeStart = 5.0;
+
+                if (count >= 5)
+                {
+                    double wrapPoint = count / 2.0;
+                    // If we have fewer than 12 icons, start fading out before the wrap point to hide the teleportation
+                    if (wrapPoint - 0.5 < fadeStart)
+                    {
+                        fadeStart = wrapPoint - 0.5;
+                    }
+                }
+
+                double opacity = 1.0;
+                if (absDist > fadeStart)
+                {
+                    // Use a sharp fade over 0.5 distance to completely hide the item right before it teleports
+                    opacity = Math.Max(0, 1.0 - ((absDist - fadeStart) * 2.0));
+                }
+
+                double scale = 1.0;
+
+                fe.RenderTransform = new System.Windows.Media.ScaleTransform(scale, scale);
+                fe.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+                fe.Opacity = opacity;
+
+                System.Windows.Controls.Canvas.SetLeft(fe, x);
+                System.Windows.Controls.Canvas.SetTop(fe, y - (itemHeight / 2.0));
+
+                System.Windows.Controls.Panel.SetZIndex(fe, (int)((1.0 - absDist) * 100));
+                fe.Visibility = opacity == 0 ? Visibility.Collapsed : Visibility.Visible;
+                fe.IsHitTestVisible = opacity > 0.1; // Allow clicking any visible item on the track
+            }
+        }
+
+        private void SidebarCarouselCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            UpdateCarousel();
+        }
+
+        private void SidebarCarousel_MouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+        {
+            _targetWheelAngle += (e.Delta > 0 ? -1.0 : 1.0);
+
+            if (_carouselItems.Count < 5)
+            {
+                if (_targetWheelAngle < 0) _targetWheelAngle = 0;
+                if (_targetWheelAngle > _carouselItems.Count - 1) _targetWheelAngle = Math.Max(0, _carouselItems.Count - 1);
+            }
+
+            if (!_isWheelAnimating)
+            {
+                _isWheelAnimating = true;
+                System.Windows.Media.CompositionTarget.Rendering += CarouselAnimationLoop;
+            }
+        }
+
+        private void CarouselAnimationLoop(object? sender, EventArgs e)
+        {
+            double stiffness = 0.1;
+            double damping = 0.75;
+
+            double diff = _targetWheelAngle - _currentWheelAngle;
+
+            // If we're very close, just snap to the target and stop animating.
+            if (Math.Abs(diff) < 0.001 && Math.Abs(_wheelVelocity) < 0.001)
+            {
+                // Normalize the angle to prevent it from growing infinitely and causing floating point errors
+                int count = _carouselItems.Count;
+                if (count > 0)
+                {
+                    if (count >= 5)
+                    {
+                        if (count % 2 == 0)
+                        {
+                            _targetWheelAngle = Math.Round(_targetWheelAngle - 0.5) + 0.5;
+                        }
+                        else
+                        {
+                            _targetWheelAngle = Math.Round(_targetWheelAngle);
+                        }
+                        _targetWheelAngle = (_targetWheelAngle % count + count) % count;
+                    }
+                    else
+                    {
+                        _targetWheelAngle = Math.Round(_targetWheelAngle);
+                        if (_targetWheelAngle < 0) _targetWheelAngle = 0;
+                        if (_targetWheelAngle > count - 1) _targetWheelAngle = Math.Max(0, count - 1);
+                    }
+                }
+
+                _currentWheelAngle = _targetWheelAngle;
+                _wheelVelocity = 0;
+                _isWheelAnimating = false;
+                System.Windows.Media.CompositionTarget.Rendering -= CarouselAnimationLoop;
+            }
+            else
+            {
+                // Apply spring force to pull the current angle towards the target
+                double springForce = diff * stiffness;
+                _wheelVelocity += springForce;
+
+                // Apply damping to simulate friction and prevent infinite oscillation
+                _wheelVelocity *= damping;
+
+                // Update the actual angle
+                _currentWheelAngle += _wheelVelocity;
+
+                // Aggressive normalization to keep the wheel's index from growing infinitely.
+                // This prevents floating-point errors and ensures the wrapping logic is always stable,
+                // especially when items are added or removed from the carousel.
+                int count = _carouselItems.Count;
+                if (count >= 5)
+                {
+                    double amountToNormalize = Math.Floor(_currentWheelAngle / count) * count;
+                    if (amountToNormalize != 0)
+                    {
+                        _currentWheelAngle -= amountToNormalize;
+                        _targetWheelAngle -= amountToNormalize;
+                    }
+                }
+            }
+            UpdateCarousel();
+        }
+
+        private void LoadPinnedCarouselItems()
+        {
+            try
+            {
+                if (File.Exists(_pinnedItemsFilePath))
+                {
+                    var json = File.ReadAllText(_pinnedItemsFilePath);
+                    var loaded = JsonSerializer.Deserialize<List<PinnedItemData>>(json);
+                    if (loaded != null)
+                    {
+                        foreach (var data in loaded)
+                        {
+                            if (File.Exists(data.FilePath) || Directory.Exists(data.FilePath) || data.FilePath.StartsWith("shell:"))
+                            {
+                                ImageSource? icon = GetSpecificFileIcon(data.FilePath);
+                                _carouselItems.Add(new SidebarItem { DisplayName = data.DisplayName, TargetPath = data.FilePath, Icon = icon });
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void SavePinnedCarouselItems()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(_pinnedItemsFilePath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir!);
+
+                var toSave = _carouselItems.Where(x => !string.IsNullOrEmpty(x.TargetPath)).Select(x => new PinnedItemData { FilePath = x.TargetPath, DisplayName = x.DisplayName }).ToList();
+                File.WriteAllText(_pinnedItemsFilePath, JsonSerializer.Serialize(toSave));
+            }
+            catch { }
+        }
+
+        private void PinItemToCarousel(string path)
+        {
+            if (path.StartsWith("::{")) return; // Skip virtual God mode items
+
+            string displayName = Path.GetFileNameWithoutExtension(path);
+            if (string.IsNullOrEmpty(displayName)) displayName = Path.GetFileName(path);
+
+            ImageSource? icon = GetSpecificFileIcon(path);
+            var newItem = new SidebarItem { DisplayName = displayName, TargetPath = path, Icon = icon };
+
+            _carouselItems.Add(newItem);
+            AddCarouselUIElement(newItem);
+
+            SavePinnedCarouselItems();
+
+            if (!_isWheelAnimating)
+            {
+                _isWheelAnimating = true;
+                System.Windows.Media.CompositionTarget.Rendering += CarouselAnimationLoop;
+            }
+
+            UpdateCarousel();
+        }
+
+        private void ListBoxItem_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _dragStartPoint = e.GetPosition(null);
+        }
+
+        private void ListBoxItem_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                System.Windows.Point position = e.GetPosition(null);
+                if (Math.Abs(position.X - _dragStartPoint.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                    Math.Abs(position.Y - _dragStartPoint.Y) > SystemParameters.MinimumVerticalDragDistance)
+                {
+                    if (sender is System.Windows.Controls.ListBoxItem item && item.DataContext is SearchResult result && !string.IsNullOrEmpty(result.FileName))
+                    {
+                        try
+                        {
+                            if (!result.FileName.StartsWith("::{", StringComparison.OrdinalIgnoreCase) && !result.FileName.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                System.Windows.DataObject data = new System.Windows.DataObject(System.Windows.DataFormats.FileDrop, new string[] { result.FileName });
+                                System.Windows.DragDrop.DoDragDrop(item, data, System.Windows.DragDropEffects.Copy | System.Windows.DragDropEffects.Link);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+
+        private void SidebarCarousel_DragEnter(object sender, System.Windows.DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) e.Effects = System.Windows.DragDropEffects.Copy | System.Windows.DragDropEffects.Link;
+            else if (e.Data.GetDataPresent("SidebarItem")) e.Effects = System.Windows.DragDropEffects.Move;
+            else e.Effects = System.Windows.DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        private void SidebarCarousel_Drop(object sender, System.Windows.DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
+            {
+                string[]? files = e.Data.GetData(System.Windows.DataFormats.FileDrop) as string[];
+                if (files != null && files.Length > 0) PinItemToCarousel(files[0]);
+            }
+            else if (e.Data.GetDataPresent("SidebarItem"))
+            {
+                if (e.Data.GetData("SidebarItem") is SidebarItem draggedItem)
+                {
+                    double dropY = e.GetPosition(SidebarCarouselCanvas).Y;
+                    double centerY = SidebarCarouselCanvas.ActualHeight / 2.0;
+                    double verticalSpacing = SidebarIconSize * 1.0;
+
+                    // Calculate the theoretical index slot you dropped the item on
+                    double dist = (dropY - centerY) / verticalSpacing;
+                    int count = _carouselItems.Count;
+                    if (count == 0) return;
+
+                    int targetIndex = (int)Math.Round(_currentWheelAngle + dist);
+                    targetIndex = (targetIndex % count + count) % count;
+
+                    int currentIndex = _carouselItems.IndexOf(draggedItem);
+                    if (currentIndex != -1 && currentIndex != targetIndex)
+                    {
+                        _carouselItems.RemoveAt(currentIndex);
+                        _carouselItems.Insert(targetIndex, draggedItem);
+
+                        SavePinnedCarouselItems();
+
+                        if (!_isWheelAnimating)
+                        {
+                            _isWheelAnimating = true;
+                            System.Windows.Media.CompositionTarget.Rendering += CarouselAnimationLoop;
+                        }
+                        UpdateCarousel();
+                    }
+                }
+            }
+        }
+
         private void ListBoxItem_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (sender is System.Windows.Controls.ListBoxItem item && item.DataContext is SearchResult result)
@@ -2348,6 +2989,36 @@ namespace MBRDeepDrawer
                 catch (Exception)
                 {
                     // User likely cancelled the UAC prompt, fail silently.
+                }
+            }
+        }
+
+        private void MenuItem_SendToDesktop_Click(object sender, RoutedEventArgs e)
+        {
+            var result = GetResultFromMenuItem(sender);
+            if (result != null && !string.IsNullOrEmpty(result.FileName))
+            {
+                try
+                {
+                    if (result.FileName.StartsWith("::{ED7BA470", StringComparison.OrdinalIgnoreCase)) return; // Ignore God Mode items
+
+                    string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                    string safeName = string.Join("_", (result.DisplayName ?? "Shortcut").Split(Path.GetInvalidFileNameChars()));
+                    string shortcutPath = Path.Combine(desktop, safeName + ".lnk");
+
+                    Type? shellAppType = Type.GetTypeFromProgID("WScript.Shell");
+                    if (shellAppType != null)
+                    {
+                        dynamic shell = Activator.CreateInstance(shellAppType)!;
+                        dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                        shortcut.TargetPath = result.FileName;
+                        shortcut.WorkingDirectory = Path.GetDirectoryName(result.FileName);
+                        shortcut.Save();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show($"Could not create shortcut: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -2762,6 +3433,21 @@ namespace MBRDeepDrawer
             try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
         }
 
+        private void Sidebar_DeviceManager_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo("devmgmt.msc") { UseShellExecute = true }); HideDrawer(); } catch { }
+        }
+
+        private void Sidebar_AppsAndFeatures_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo("ms-settings:appsfeatures") { UseShellExecute = true }); HideDrawer(); } catch { }
+        }
+
+        private void Sidebar_ResourceMonitor_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo("resmon.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
+        }
+
         private async void Sidebar_Start_Click(object sender, RoutedEventArgs e)
         {
             HideDrawer();
@@ -3153,15 +3839,30 @@ namespace MBRDeepDrawer
     }
 
     // Data model for the XAML Binding
-    public class SearchResult
+    public class SearchResult : INotifyPropertyChanged
     {
         public string? FileName { get; set; }
         public string? DisplayName { get; set; }
+
+        private ImageSource? _icon;
         // Changed from string to ImageSource for direct XAML binding
-        public ImageSource? Icon { get; set; }
+        public ImageSource? Icon
+        {
+            get => _icon;
+            set
+            {
+                if (_icon != value)
+                {
+                    _icon = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Icon)));
+                }
+            }
+        }
         public string Category { get; set; } = "Files";
         public string MainCategory { get; set; } = "Files";
         public string SubCategory { get; set; } = "Files";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     public class SearchRequest
@@ -3209,6 +3910,22 @@ namespace MBRDeepDrawer
         public string AdvContent2 { get; set; } = "";
     }
 
+    public class SidebarItem
+    {
+        public string DisplayName { get; set; } = "";
+        public string TargetPath { get; set; } = "";
+        public ImageSource? Icon { get; set; }
+        public Action? NativeAction { get; set; }
+        public UIElement? UIElement { get; set; }
+        public System.Windows.Controls.ContextMenu? ContextMenu { get; set; }
+    }
+
+    public class PinnedItemData
+    {
+        public string FilePath { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+    }
+
     [ComImport]
     [Guid("00021401-0000-0000-C000-000000000046")]
     internal class ShellLink { }
@@ -3249,5 +3966,11 @@ namespace MBRDeepDrawer
         void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
         void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
         void GetCurFile([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder ppszFileName);
+    }
+
+    public class NativeWindowWrapper : System.Windows.Forms.IWin32Window
+    {
+        public IntPtr Handle { get; }
+        public NativeWindowWrapper(IntPtr handle) { Handle = handle; }
     }
 }
