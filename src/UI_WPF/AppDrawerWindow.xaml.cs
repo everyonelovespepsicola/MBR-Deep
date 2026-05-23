@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -84,6 +85,16 @@ namespace MBRDeepDrawer
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr FindWindowEx(IntPtr parentHandle, IntPtr childAfter, string className, string? windowTitle);
 
         [DllImport("dwmapi.dll")]
@@ -107,6 +118,15 @@ namespace MBRDeepDrawer
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_SHOWWINDOW = 0x0040;
+        private const uint SWP_NOACTIVATE = 0x0010;
+        private const int SW_SHOWNOACTIVATE = 4;
+        private const int SW_MINIMIZE = 6;
+        private const int SW_RESTORE = 9;
+        private const int GWL_STYLE = -16;
+        private const uint WS_MAXIMIZE = 0x01000000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 
         // --- Windows API for Global Hotkey ---
         [DllImport("user32.dll")]
@@ -284,6 +304,8 @@ namespace MBRDeepDrawer
         private bool _isAdvSearching = false;
         private bool _hasGainedFocusSinceOpen = false;
         private bool _isDialogActive = false;
+        private IntPtr _minimizedAppHwnd = IntPtr.Zero;
+        private bool _launchedApp = false;
 
         public ImageSource? IconThisPC { get; set; }
         public ImageSource? IconControlPanel { get; set; }
@@ -303,6 +325,13 @@ namespace MBRDeepDrawer
         private void HideDrawer()
         {
             if (!this.IsVisible || _isAnimating) return;
+
+            if (_minimizedAppHwnd != IntPtr.Zero && !_launchedApp)
+            {
+                ShowWindow(_minimizedAppHwnd, SW_RESTORE);
+            }
+            _minimizedAppHwnd = IntPtr.Zero;
+            _launchedApp = false;
 
             // Fallback to instant hide if the user selected "None" in the Settings
             if (_appSettings.TransitionEffect == "None" || _appSettings.AnimationSpeed <= 0.0)
@@ -682,6 +711,35 @@ namespace MBRDeepDrawer
             IntPtr targetHwnd = new WindowInteropHelper(this).Handle;
             IntPtr foregroundHwnd = GetForegroundWindow();
 
+            // 0. Demote the current foreground app (e.g., Borderless Game) so it doesn't fight the Taskbar
+            if (foregroundHwnd != IntPtr.Zero && foregroundHwnd != targetHwnd)
+            {
+                var className = new System.Text.StringBuilder(256);
+                GetClassName(foregroundHwnd, className, className.Capacity);
+                string cls = className.ToString();
+
+                // Do not accidentally demote the Windows Shell itself
+                if (cls != "Shell_TrayWnd" && cls != "Progman" && cls != "WorkerW")
+                {
+                    GetWindowRect(foregroundHwnd, out RECT rect);
+                    int width = rect.Right - rect.Left;
+                    int height = rect.Bottom - rect.Top;
+                    var screen = System.Windows.Forms.Screen.FromHandle(foregroundHwnd);
+
+                    // If the app is completely the size of the screen, it's a fullscreen/borderless game
+                    // (Normal maximized windows are restricted by the work area and will not trigger this)
+                    if (width >= screen.Bounds.Width && height >= screen.Bounds.Height)
+                    {
+                        _minimizedAppHwnd = foregroundHwnd;
+                        ShowWindow(foregroundHwnd, SW_MINIMIZE);
+                    }
+                    else
+                    {
+                        SetWindowPos(foregroundHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    }
+                }
+            }
+
             // 1. Explicitly Force Foreground Z-Ordering as Topmost
             SetWindowPos(targetHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
@@ -757,22 +815,24 @@ namespace MBRDeepDrawer
             return false;
         }
 
-        private void SetTaskbarTopmost(bool isTopmost)
+        private void BumpTaskbarToTop()
         {
-            IntPtr flag = isTopmost ? HWND_TOPMOST : HWND_NOTOPMOST;
-            uint flags = isTopmost ? (SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW) : (SWP_NOMOVE | SWP_NOSIZE);
+            // The Windows taskbar natively has WS_EX_TOPMOST.
+            // By applying HWND_TOPMOST without modifying its state, we just bump it to the
+            // top of the topmost Z-order list so it sits above any borderless fullscreen games.
+            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE;
 
             IntPtr taskbarHwnd = FindWindow("Shell_TrayWnd", null);
             if (taskbarHwnd != IntPtr.Zero)
             {
-                SetWindowPos(taskbarHwnd, flag, 0, 0, 0, 0, flags);
+                SetWindowPos(taskbarHwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
             }
 
             // Loop to handle all secondary monitors' taskbars
             IntPtr secTaskbarHwnd = IntPtr.Zero;
             while ((secTaskbarHwnd = FindWindowEx(IntPtr.Zero, secTaskbarHwnd, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
             {
-                SetWindowPos(secTaskbarHwnd, flag, 0, 0, 0, 0, flags);
+                SetWindowPos(secTaskbarHwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
             }
         }
 
@@ -864,25 +924,28 @@ namespace MBRDeepDrawer
                     IntPtr targetHwnd = new WindowInteropHelper(this).Handle;
                     IntPtr fgHwnd = GetForegroundWindow();
 
-                    if (fgHwnd != targetHwnd && fgHwnd != IntPtr.Zero)
+                    if (fgHwnd != targetHwnd)
                     {
-                        if (_isDialogActive) return;
-
-                        GetWindowThreadProcessId(fgHwnd, out uint fgPid);
-
-                        if (fgPid != _myPid)
+                        if (fgHwnd != IntPtr.Zero)
                         {
-                            // Add a grace period to prevent instant hiding when Windows blocks focus stealing.
-                            // Only hide if we successfully grabbed focus first, or if a reasonable timeout has passed.
-                            if (_hasGainedFocusSinceOpen || (DateTime.Now - _lastOpened).TotalMilliseconds > 1500)
+                            if (_isDialogActive) return;
+
+                            GetWindowThreadProcessId(fgHwnd, out uint fgPid);
+
+                            if (fgPid != _myPid)
                             {
-                                _lastDeactivated = DateTime.Now;
-                                HideDrawer();
+                                // Add a grace period to prevent instant hiding when Windows blocks focus stealing.
+                                // Only hide if we successfully grabbed focus first, or if a reasonable timeout has passed.
+                                if (_hasGainedFocusSinceOpen || (DateTime.Now - _lastOpened).TotalMilliseconds > 1500)
+                                {
+                                    _lastDeactivated = DateTime.Now;
+                                    HideDrawer();
+                                }
                             }
-                        }
-                        else
-                        {
-                            _hasGainedFocusSinceOpen = true;
+                            else
+                            {
+                                _hasGainedFocusSinceOpen = true;
+                            }
                         }
                     }
                     else
@@ -972,7 +1035,7 @@ namespace MBRDeepDrawer
                     RefreshDriveList();
 
                     // Force the taskbar to appear over any borderless fullscreen games
-                    SetTaskbarTopmost(true);
+                    BumpTaskbarToTop();
 
                     _focusCheckTimer?.Start();
 
@@ -998,9 +1061,6 @@ namespace MBRDeepDrawer
                 }
                 else
                 {
-                    // Restore the taskbar's default (non-topmost) state
-                    SetTaskbarTopmost(false);
-
                     _focusCheckTimer?.Stop();
                     _perfTimer?.Stop();
                     _telemetryCts?.Cancel();
@@ -1681,6 +1741,32 @@ namespace MBRDeepDrawer
             // Populate the UI if the user hasn't typed anything yet
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
+                var terminalApp = _defaultAppDrawerCache.FirstOrDefault(a => a.DisplayName != null && a.DisplayName.Contains("Terminal", StringComparison.OrdinalIgnoreCase) && a.SubCategory == "Windows Apps");
+                if (terminalApp == null) terminalApp = _defaultAppDrawerCache.FirstOrDefault(a => a.DisplayName != null && a.DisplayName.Contains("Terminal", StringComparison.OrdinalIgnoreCase));
+
+                if (terminalApp != null)
+                {
+                    BtnAppxTerminal.DataContext = terminalApp;
+                    BtnAppxTerminal.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    BtnAppxTerminal.Visibility = Visibility.Collapsed;
+                }
+
+                var calcApp = _defaultAppDrawerCache.FirstOrDefault(a => a.DisplayName != null && a.DisplayName.Equals("Calculator", StringComparison.OrdinalIgnoreCase) && a.SubCategory == "Windows Apps");
+                if (calcApp == null) calcApp = _defaultAppDrawerCache.FirstOrDefault(a => a.DisplayName != null && a.DisplayName.Contains("Calculator", StringComparison.OrdinalIgnoreCase));
+
+                if (calcApp != null)
+                {
+                    BtnAppxCalculator.DataContext = calcApp;
+                    BtnAppxCalculator.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    BtnAppxCalculator.Visibility = Visibility.Collapsed;
+                }
+
                 if (string.IsNullOrWhiteSpace(SearchBox.Text) && TabApps.IsChecked == true)
                 {
                     ShowDefaultApps();
@@ -2128,6 +2214,30 @@ namespace MBRDeepDrawer
 
         // --- Advanced Search UI ---
 
+        private void BtnAppxCalculator_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn && btn.DataContext is SearchResult result)
+            {
+                OpenResult(result);
+            }
+            else
+            {
+                try { Process.Start(new ProcessStartInfo("calc.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
+            }
+        }
+
+        private void BtnAppxTerminal_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn && btn.DataContext is SearchResult result)
+            {
+                OpenResult(result);
+            }
+            else
+            {
+                try { Process.Start(new ProcessStartInfo("wt.exe") { UseShellExecute = true }); HideDrawer(); } catch { }
+            }
+        }
+
         private void BtnAdvanced_Click(object sender, RoutedEventArgs e)
         {
             BasicSearchPanel.Visibility = Visibility.Collapsed;
@@ -2517,7 +2627,42 @@ namespace MBRDeepDrawer
             perf.ContextMenu = ctxPerf;
             _carouselItems.Add(perf);
 
+            bool isFirstRun = !File.Exists(_pinnedItemsFilePath);
+
             LoadPinnedCarouselItems();
+
+            if (isFirstRun)
+            {
+                // 6. Downloads
+                string downloadsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                if (Directory.Exists(downloadsPath))
+                {
+                    _carouselItems.Add(new SidebarItem { DisplayName = "Downloads", TargetPath = downloadsPath, Icon = GetSpecificFileIcon(downloadsPath) });
+                }
+
+                // 7. Documents
+                string docsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                if (Directory.Exists(docsPath))
+                {
+                    _carouselItems.Add(new SidebarItem { DisplayName = "Documents", TargetPath = docsPath, Icon = GetSpecificFileIcon(docsPath) });
+                }
+
+                // 8. Pictures
+                string picsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                if (Directory.Exists(picsPath))
+                {
+                    _carouselItems.Add(new SidebarItem { DisplayName = "Pictures", TargetPath = picsPath, Icon = GetSpecificFileIcon(picsPath) });
+                }
+
+                // 9. Music
+                string musicPath = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+                if (Directory.Exists(musicPath))
+                {
+                    _carouselItems.Add(new SidebarItem { DisplayName = "Music", TargetPath = musicPath, Icon = GetSpecificFileIcon(musicPath) });
+                }
+
+                SavePinnedCarouselItems();
+            }
 
             foreach (var item in _carouselItems) AddCarouselUIElement(item);
 
@@ -3546,6 +3691,12 @@ namespace MBRDeepDrawer
         private void Sidebar_Power_Restart_Click(object sender, RoutedEventArgs e)
         {
             try { Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = true }); } catch { }
+        }
+
+        private void Sidebar_Power_Sleep_Click(object sender, RoutedEventArgs e)
+        {
+            // Safely puts the computer into Sleep/Suspend mode
+            try { Process.Start(new ProcessStartInfo("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0") { CreateNoWindow = true }); } catch { }
         }
 
         private void Sidebar_Power_Shutdown_Click(object sender, RoutedEventArgs e)

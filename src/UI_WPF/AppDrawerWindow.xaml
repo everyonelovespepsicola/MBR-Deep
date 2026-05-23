@@ -717,6 +717,8 @@
                                       Click="Sidebar_Power_Logout_Click"/>
                             <MenuItem Header="Restart"
                                       Click="Sidebar_Power_Restart_Click"/>
+                            <MenuItem Header="Sleep"
+                                      Click="Sidebar_Power_Sleep_Click"/>
                             <MenuItem Header="Shut Down"
                                       Click="Sidebar_Power_Shutdown_Click"/>
                         </ContextMenu>
@@ -949,6 +951,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
@@ -977,9 +980,80 @@
                                      Checked="SortMode_Changed"/>
                     </StackPanel>
 
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                Margin="0,0,10,0">
+                        <Button x:Name="BtnAppxTerminal"
+                                Width="50"
+                                Height="50"
+                                Margin="0,0,5,0"
+                                Background="Transparent"
+                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                ToolTip="Windows Terminal"
+                                Visibility="Collapsed"
+                                Click="BtnAppxTerminal_Click"
+                                MouseEnter="Interactive_MouseEnter"
+                                MouseLeave="Interactive_MouseLeave">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="HoverBorder"
+                                            Background="{TemplateBinding Background}"
+                                            CornerRadius="8"
+                                            RenderTransformOrigin="0.5,0.5">
+                                        <Border.RenderTransform>
+                                            <ScaleTransform ScaleX="1.0"
+                                                            ScaleY="1.0"/>
+                                        </Border.RenderTransform>
+                                        <Image Source="{Binding Icon}"
+                                               Width="36"
+                                               Height="36"
+                                               RenderOptions.BitmapScalingMode="HighQuality"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <Button x:Name="BtnAppxCalculator"
+                                Width="50"
+                                Height="50"
+                                Margin="5,0,0,0"
+                                Background="Transparent"
+                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                ToolTip="Windows Calculator"
+                                Visibility="Collapsed"
+                                Click="BtnAppxCalculator_Click"
+                                MouseEnter="Interactive_MouseEnter"
+                                MouseLeave="Interactive_MouseLeave">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="HoverBorder"
+                                            Background="{TemplateBinding Background}"
+                                            CornerRadius="8"
+                                            RenderTransformOrigin="0.5,0.5">
+                                        <Border.RenderTransform>
+                                            <ScaleTransform ScaleX="1.0"
+                                                            ScaleY="1.0"/>
+                                        </Border.RenderTransform>
+                                        <Image Source="{Binding Icon}"
+                                               Width="36"
+                                               Height="36"
+                                               RenderOptions.BitmapScalingMode="HighQuality"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+
                     <TextBox x:Name="SearchBox"
                              x:FieldModifier="public"
-                             Grid.Column="1"
+                             Grid.Column="2"
                              Height="50"
                              Width="720"
                              FontSize="24"
@@ -1022,7 +1096,7 @@
                     </TextBox>
 
                     <Button x:Name="BtnAdvanced"
-                            Grid.Column="2"
+                            Grid.Column="3"
                             Width="50"
                             Height="50"
                             Margin="10,0,0,0"
@@ -1304,27 +1378,6 @@
                                     </Button.Template>
                                 </Button>
                             </StackPanel>
-                        </Grid>
-
-                        <Grid Margin="0,0,0,20">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="200"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Hover Bounce Scale:"
-                                       Foreground="{DynamicResource SecondaryTextBrush}"
-                                       FontSize="16"
-                                       VerticalAlignment="Center"/>
-                            <Slider x:Name="SettingsHoverScale"
-                                    Grid.Column="1"
-                                    Width="300"
-                                    HorizontalAlignment="Left"
-                                    Minimum="1.0"
-                                    Maximum="2.0"
-                                    Value="1.25"
-                                    TickFrequency="0.05"
-                                    IsSnapToTickEnabled="True"
-                                    ValueChanged="SettingsHoverScale_ValueChanged"/>
                         </Grid>
                     </Grid>
                 </Border>
@@ -2204,6 +2257,27 @@
                                     TickFrequency="0.1"
                                     IsSnapToTickEnabled="True"
                                     ValueChanged="SettingsSpeedSlider_ValueChanged"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Hover Bounce Scale:"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="SettingsHoverScale"
+                                    Grid.Column="1"
+                                    Width="300"
+                                    HorizontalAlignment="Left"
+                                    Minimum="1.0"
+                                    Maximum="2.0"
+                                    Value="1.25"
+                                    TickFrequency="0.05"
+                                    IsSnapToTickEnabled="True"
+                                    ValueChanged="SettingsHoverScale_ValueChanged"/>
                         </Grid>
 
                         <!-- Layout & Scaling Section -->
