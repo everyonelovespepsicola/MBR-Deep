@@ -199,7 +199,7 @@ ui_queue = queue.Queue()
 current_results = []
 
 def insert_result(data, use_tree):
-    file_name, size_str, full_path, match_count, is_folder, ext = data
+    file_name, size_str, created_str, full_path, match_count, is_folder, ext = data
     tags = ("even",) if match_count % 2 == 0 else ()
     kwargs = {}
     if HAS_PYWIN32_PILLOW:
@@ -218,7 +218,7 @@ def insert_result(data, use_tree):
                 folder_photo = get_icon("", True)
                 if folder_photo:
                     folder_kwargs['image'] = folder_photo
-            tree.insert('', 'end', iid=drive_iid, text=f" {drive_iid}", values=("", drive_iid), open=True, **folder_kwargs)
+            tree.insert('', 'end', iid=drive_iid, text=f" {drive_iid}", values=("", "", drive_iid), open=True, **folder_kwargs)
 
         parent_iid = drive_iid
         for i in range(1, len(parts) - 1):
@@ -229,20 +229,20 @@ def insert_result(data, use_tree):
                     folder_photo = get_icon("", True)
                     if folder_photo:
                         folder_kwargs['image'] = folder_photo
-                tree.insert(parent_iid, 'end', iid=current_iid, text=f" {parts[i]}", values=("", current_iid), open=True, **folder_kwargs)
+                tree.insert(parent_iid, 'end', iid=current_iid, text=f" {parts[i]}", values=("", "", current_iid), open=True, **folder_kwargs)
             parent_iid = current_iid
 
         file_iid = full_path
         if not tree.exists(file_iid):
-            tree.insert(parent_iid, 'end', iid=file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+            tree.insert(parent_iid, 'end', iid=file_iid, text=f" {file_name}", values=(size_str, created_str, full_path), tags=tags, **kwargs)
         else:
-            tree.item(file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+            tree.item(file_iid, text=f" {file_name}", values=(size_str, created_str, full_path), tags=tags, **kwargs)
     else:
         file_iid = full_path
         if not tree.exists(file_iid):
-            tree.insert('', 'end', iid=file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+            tree.insert('', 'end', iid=file_iid, text=f" {file_name}", values=(size_str, created_str, full_path), tags=tags, **kwargs)
         else:
-            tree.item(file_iid, text=f" {file_name}", values=(size_str, full_path), tags=tags, **kwargs)
+            tree.item(file_iid, text=f" {file_name}", values=(size_str, created_str, full_path), tags=tags, **kwargs)
 
 def start_search():
     if getattr(start_search, "is_running", False): return
@@ -253,18 +253,22 @@ def start_search():
     lbl_status.config(text="Scanning Master File Table... Please wait.", foreground="#00BFFF")
 
     name_query = entry_name_1.get().lower().split() + entry_name_2.get().lower().split()
+    not_name_query = entry_not_name.get().lower().split()
 
     is_case_sensitive = var_case_sensitive.get()
     selected_type = combo_type.get()
     content_1_str = entry_content_1.get()
     content_2_str = entry_content_2.get()
+    not_content_str = entry_not_content.get()
 
     if not is_case_sensitive:
         content_1_str = content_1_str.lower()
         content_2_str = content_2_str.lower()
+        not_content_str = not_content_str.lower()
 
     content_1 = content_1_str.encode('utf-8')
     content_2 = content_2_str.encode('utf-8')
+    not_content = not_content_str.encode('utf-8')
 
     filter_folder = selected_folder.get().lower()
     if filter_folder and not filter_folder.endswith('\\'):
@@ -275,6 +279,14 @@ def start_search():
         start_search.is_running = False
         btn_search.config(text="Search!", command=start_search)
         return
+
+    time_filter = combo_time.get()
+    custom_days = 0
+    if time_filter == "Custom":
+        try:
+            custom_days = int(var_custom_days.get())
+        except ValueError:
+            custom_days = 0
 
     drives_to_scan = []
     if selected_drive == "All":
@@ -311,7 +323,7 @@ def start_search():
         root.after(50, poll_queue)
 
     poll_queue()
-    threading.Thread(target=search_worker, args=(drives_to_scan, name_query, is_case_sensitive, selected_type, content_1, content_2, filter_folder, cancel_event), daemon=True).start()
+    threading.Thread(target=search_worker, args=(drives_to_scan, name_query, not_name_query, is_case_sensitive, selected_type, content_1, content_2, not_content, filter_folder, cancel_event, time_filter, custom_days), daemon=True).start()
 
 def cancel_search():
     if not getattr(start_search, "is_running", False): return
@@ -319,10 +331,17 @@ def cancel_search():
     ui_queue.put(("status", ("Canceling...", "#FFA500")))
     cancel_event.set()
 
-def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, content_1, content_2, filter_folder, cancel_event):
+def search_worker(drives_to_scan, name_query, not_name_query, is_case_sensitive, selected_type, content_1, content_2, not_content, filter_folder, cancel_event, time_filter, custom_days):
     match_count = 0
     match_lock = threading.Lock()
     start_time = time.time()
+
+    hour_start = start_time - 3600
+    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    yesterday_start = today_start - 86400
+    last_week_start = today_start - 7 * 86400
+    last_month_start = today_start - 30 * 86400
+    custom_start = today_start - custom_days * 86400
 
     for d in drives_to_scan:
         if cancel_event.is_set(): break
@@ -350,6 +369,8 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
             # Pre-filter by name here so we don't Grep the entire hard drive
             # all() ensures every word typed in the box is found somewhere in the filename
             if all(part in name_lower for part in name_query):
+                if not_name_query and any(part in name_lower for part in not_name_query):
+                    return
                 found_files.append(file_id)
 
         c_callback = CALLBACK_TYPE(custom_search_filter)
@@ -389,6 +410,28 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                 if not full_path.lower().endswith(exts):
                     return
 
+            created_str = ""
+            try:
+                ctime = os.path.getctime(full_path)
+                created_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
+                if time_filter != "None":
+                    if time_filter == "Hour" and ctime < hour_start:
+                        return
+                    elif time_filter == "Today" and ctime < today_start:
+                        return
+                    elif time_filter == "Yesterday" and not (yesterday_start <= ctime < today_start):
+                        return
+                    elif time_filter == "Last Week" and ctime < last_week_start:
+                        return
+                    elif time_filter == "Last Month" and ctime < last_month_start:
+                        return
+                    elif time_filter == "Custom" and ctime < custom_start:
+                        return
+            except Exception:
+                if time_filter != "None":
+                    return
+                created_str = "Unknown"
+
             # Highly intensive print disabled to prevent PyInstaller --windowed buffer crashes
             # print(f"[>] Checking: {full_path}")
 
@@ -417,6 +460,14 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                     else:
                         if not my_dll.FastGrepFile(full_path.encode('utf-8'), content_2, is_case_sensitive, null_ptr): return
 
+                if not_content:
+                    if is_pdf:
+                        if search_pdf(full_path, not_content, is_case_sensitive): return
+                    elif is_archive:
+                        if my_dll.FastGrepArchive(full_path.encode('utf-8'), not_content, is_case_sensitive, null_ptr): return
+                    else:
+                        if my_dll.FastGrepFile(full_path.encode('utf-8'), not_content, is_case_sensitive, null_ptr): return
+
                 file_name = mft_table[file_id][1]
                 is_folder = os.path.isdir(full_path)
                 ext = ""
@@ -437,7 +488,7 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
                 with match_lock:
                     match_count += 1
                     current_match = match_count
-                ui_queue.put(("match", (file_name, size_str, full_path, current_match, is_folder, ext)))
+                ui_queue.put(("match", (file_name, size_str, created_str, full_path, current_match, is_folder, ext)))
             except Exception as e:
                 # print(f"  ---> ERROR reading {full_path}: {e}")
                 pass
@@ -458,7 +509,7 @@ def search_worker(drives_to_scan, name_query, is_case_sensitive, selected_type, 
 # Setup Main Window
 root = tk.Tk()
 root.title("MBR-Deep-Classic")
-root.geometry("1050x500")
+root.geometry("1200x550")
 
 try:
     root.iconbitmap(get_resource_path(os.path.join("..", "..", "icon.ico")))
@@ -615,9 +666,52 @@ entry_content_2 = ttk.Entry(frame_controls)
 entry_content_2.grid(row=1, column=5, padx=5, sticky="ew", pady=5)
 add_entry_context_menu(entry_content_2)
 
-ttk.Label(frame_controls, text="In Location:").grid(row=2, column=0, padx=5, sticky="w")
+ttk.Label(frame_controls, text="Created:").grid(row=2, column=0, padx=5, sticky="w")
+frame_time = ttk.Frame(frame_controls)
+frame_time.grid(row=2, column=1, sticky="ew", pady=5)
+
+time_options = ["None", "Hour", "Today", "Yesterday", "Last Week", "Last Month", "Custom"]
+combo_time = ttk.Combobox(frame_time, values=time_options, width=10, state="readonly")
+combo_time.pack(side="left", fill="x", expand=True, padx=5)
+combo_time.set("None")
+
+var_custom_days = tk.StringVar()
+entry_custom_days = ttk.Entry(frame_time, textvariable=var_custom_days, width=4)
+
+def on_time_select(event):
+    if combo_time.get() == "Custom":
+        entry_custom_days.pack(side="left", padx=(0, 5))
+        if not var_custom_days.get():
+            var_custom_days.set("7")
+    else:
+        entry_custom_days.pack_forget()
+
+combo_time.bind("<<ComboboxSelected>>", on_time_select)
+
+style = ttk.Style()
+style.configure("Red.TLabel", foreground="#FF5555")
+
+frame_not_name = ttk.Frame(frame_controls)
+frame_not_name.grid(row=2, column=2, padx=5, sticky="e", pady=5)
+ttk.Label(frame_not_name, text="Not", style="Red.TLabel").pack(side="left")
+ttk.Label(frame_not_name, text=" Contain Name:").pack(side="left")
+
+entry_not_name = ttk.Entry(frame_controls)
+entry_not_name.grid(row=2, column=3, padx=5, sticky="ew", pady=5)
+add_entry_context_menu(entry_not_name)
+
+frame_not_content = ttk.Frame(frame_controls)
+frame_not_content.grid(row=2, column=4, padx=5, sticky="e", pady=5)
+ttk.Label(frame_not_content, text="Not", style="Red.TLabel").pack(side="left")
+ttk.Label(frame_not_content, text=" Content Contains:").pack(side="left")
+
+entry_not_content = ttk.Entry(frame_controls)
+entry_not_content.grid(row=2, column=5, padx=5, sticky="ew", pady=5)
+add_entry_context_menu(entry_not_content)
+
+ttk.Label(frame_controls, text="In Location:").grid(row=3, column=0, padx=5, sticky="w")
 frame_loc = ttk.Frame(frame_controls)
-frame_loc.grid(row=2, column=1, columnspan=4, sticky="ew", pady=5)
+frame_loc.grid(row=3, column=1, columnspan=4, sticky="ew", pady=5)
 
 entry_loc = ttk.Entry(frame_loc, textvariable=selected_folder, state="readonly")
 entry_loc.pack(side="left", fill="x", expand=True, padx=5)
@@ -629,14 +723,13 @@ btn_clear = ttk.Button(frame_loc, text="Clear", command=clear_folder)
 btn_clear.pack(side="left", padx=5)
 
 btn_search = ttk.Button(frame_controls, text="Search!", command=start_search)
-btn_search.grid(row=2, column=5, padx=5, sticky="ew", pady=5)
+btn_search.grid(row=3, column=5, padx=5, sticky="ew", pady=(0, 5))
 
 frame_controls.columnconfigure(3, weight=1)
 frame_controls.columnconfigure(5, weight=1)
 
 # Setup Results Table
 frame_results = ttk.Frame(root)
-frame_results.pack(fill="both", expand=True, padx=10, pady=5)
 
 def sortby(tree, col, descending):
     # Grab values to sort
@@ -666,7 +759,7 @@ def sortby(tree, col, descending):
     # Switch the heading so the next click will sort in the opposite direction
     tree.heading(col, command=lambda col=col: sortby(tree, col, int(not descending)))
 
-columns = ("Size", "Location")
+columns = ("Size", "Created", "Location")
 tree = ttk.Treeview(frame_results, columns=columns, show="tree headings")
 
 style = ttk.Style()
@@ -678,6 +771,7 @@ tree.column("#0", width=200)
 for col in columns:
     tree.heading(col, text=col, command=lambda c=col: sortby(tree, c, 0))
 tree.column("Size", width=80, anchor="center") # anchor="center" center-aligns the size numbers
+tree.column("Created", width=140, anchor="center")
 tree.column("Location", width=500)
 
 if USING_SV_TTK:
@@ -692,6 +786,7 @@ tree.tag_configure("even", background="#2a2a2a")
 
 frame_bottom = ttk.Frame(root)
 frame_bottom.pack(side="bottom", fill="x", padx=10, pady=5)
+frame_results.pack(fill="both", expand=True, padx=10, pady=5)
 
 var_tree_view = tk.BooleanVar(value=False)
 

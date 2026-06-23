@@ -1,0 +1,4 @@
+Drive{    v}                  File Name Contains [               ]File Content Contains [               ] 
+▣ Case Sensitive {Everythingv} And Name Contains [              ] And Content Contains [               ] 
+Created {None        v}         Not Contain Name [               ] Not Content Contains [               ]
+In Location [                                                    ] ( Select )( Clear ) (    Search     )
