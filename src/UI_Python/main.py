@@ -153,6 +153,12 @@ def get_resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
 # 1. Load your newly created DLL
 dll_path = get_resource_path(os.path.join("..", "Engine", "fast_search.dll"))
 try:
@@ -160,6 +166,19 @@ try:
     my_dll = ctypes.CDLL(dll_path)
 except OSError as e:
     print(f"Failed to load DLL. Ensure it exists here: {dll_path}\nError: {e}")
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root_err = tk.Tk()
+        root_err.withdraw()
+        messagebox.showerror(
+            "DLL Load Error",
+            f"Failed to load the search engine DLL.\n\n"
+            f"Ensure it exists at:\n{dll_path}\n\n"
+            f"Error: {e}"
+        )
+    except Exception:
+        pass
     exit(1)
 
 # 2. Define the C signatures for safety
@@ -260,6 +279,24 @@ def start_search():
     content_1_str = entry_content_1.get()
     content_2_str = entry_content_2.get()
     not_content_str = entry_not_content.get()
+    filter_folder = selected_folder.get().lower()
+
+    # Enforce at least one search criterion to prevent scanning the entire drive without filters
+    if (not name_query and not not_name_query and 
+        not content_1_str and not content_2_str and not not_content_str and 
+        not filter_folder):
+        from tkinter import messagebox
+        messagebox.showwarning(
+            "No Search Criteria Specified",
+            "Please enter at least one search parameter (e.g. File Name, Content, or Location) before starting a search."
+        )
+        start_search.is_running = False
+        btn_search.config(text="Search!", command=start_search)
+        if is_admin():
+            lbl_status.config(text="Ready. (Administrator Mode)", foreground="#55FF55")
+        else:
+            lbl_status.config(text="WARNING: Not running as Administrator! Search will be incomplete.", foreground="#FF5555")
+        return
 
     if not is_case_sensitive:
         content_1_str = content_1_str.lower()
@@ -270,7 +307,6 @@ def start_search():
     content_2 = content_2_str.encode('utf-8')
     not_content = not_content_str.encode('utf-8')
 
-    filter_folder = selected_folder.get().lower()
     if filter_folder and not filter_folder.endswith('\\'):
         filter_folder += '\\'
 
@@ -493,10 +529,14 @@ def search_worker(drives_to_scan, name_query, not_name_query, is_case_sensitive,
                 # print(f"  ---> ERROR reading {full_path}: {e}")
                 pass
 
-        # Execute file checks concurrently utilizing the thread pool
+        # Execute file checks concurrently in small chunks to support responsive cancellation
+        chunk_size = 100
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            # Use list() to ensure the map completes before we check the cancel event again
-            list(executor.map(process_file, found_files))
+            for i in range(0, len(found_files), chunk_size):
+                if cancel_event.is_set():
+                    break
+                chunk = found_files[i:i+chunk_size]
+                list(executor.map(process_file, chunk))
 
         if cancel_event.is_set(): break
 
@@ -713,8 +753,18 @@ ttk.Label(frame_controls, text="In Location:").grid(row=3, column=0, padx=5, sti
 frame_loc = ttk.Frame(frame_controls)
 frame_loc.grid(row=3, column=1, columnspan=4, sticky="ew", pady=5)
 
-entry_loc = ttk.Entry(frame_loc, textvariable=selected_folder, state="readonly")
+entry_loc = ttk.Entry(frame_loc, textvariable=selected_folder)
 entry_loc.pack(side="left", fill="x", expand=True, padx=5)
+add_entry_context_menu(entry_loc)
+
+def update_drive_from_folder(*args):
+    path = selected_folder.get()
+    if len(path) >= 2 and path[1] == ':':
+        drive = path[0].upper()
+        if drive in available_drives:
+            combo_drive.set(drive)
+
+selected_folder.trace_add("write", update_drive_from_folder)
 
 btn_browse = ttk.Button(frame_loc, text="Select...", command=browse_folder)
 btn_browse.pack(side="left")
@@ -732,6 +782,12 @@ frame_controls.columnconfigure(5, weight=1)
 frame_results = ttk.Frame(root)
 
 def sortby(tree, col, descending):
+    if getattr(sortby, "is_sorting", False):
+        return
+    sortby.is_sorting = True
+
+    lbl_status.config(text="Sorting results... Please wait.", foreground="#00BFFF")
+
     # Grab values to sort
     if col == "#0":
         data = [(tree.item(child, 'text'), child) for child in tree.get_children('')]
@@ -750,14 +806,30 @@ def sortby(tree, col, descending):
     else:
         data.sort(key=lambda x: x[0].lower(), reverse=descending)
 
-    for ix, item in enumerate(data):
-        tree.move(item[1], '', ix)
-        # Re-apply the zebra-striping tag so rows stay nicely alternated
-        tags = ("even",) if ix % 2 == 0 else ()
-        tree.item(item[1], tags=tags)
+    def process_sort_batch(index):
+        if index >= len(data):
+            if is_admin():
+                lbl_status.config(text="Sorting complete.", foreground="#55FF55")
+            else:
+                lbl_status.config(text="Sorting complete. (WARNING: Not running as Administrator!)", foreground="#FF5555")
+            # Switch the heading so the next click will sort in the opposite direction
+            tree.heading(col, command=lambda col=col: sortby(tree, col, int(not descending)))
+            sortby.is_sorting = False
+            return
 
-    # Switch the heading so the next click will sort in the opposite direction
-    tree.heading(col, command=lambda col=col: sortby(tree, col, int(not descending)))
+        # Process in batches of 100 to avoid UI freezing
+        end_idx = min(index + 100, len(data))
+        for ix in range(index, end_idx):
+            item = data[ix]
+            tree.move(item[1], '', ix)
+            # Re-apply the zebra-striping tag so rows stay nicely alternated
+            tags = ("even",) if ix % 2 == 0 else ()
+            tree.item(item[1], tags=tags)
+
+        # Schedule the next batch to yield to Tkinter's event loop
+        root.after(5, lambda: process_sort_batch(end_idx))
+
+    process_sort_batch(0)
 
 columns = ("Size", "Created", "Location")
 tree = ttk.Treeview(frame_results, columns=columns, show="tree headings")
@@ -805,14 +877,17 @@ def toggle_view():
 chk_view = ttk.Checkbutton(frame_bottom, text="View", variable=var_tree_view, command=toggle_view)
 chk_view.pack(side="left")
 
-lbl_status = ttk.Label(frame_bottom, text="Ready. (Ensure terminal is running as Administrator)", foreground="#AAAAAA", anchor="center")
+if is_admin():
+    lbl_status = ttk.Label(frame_bottom, text="Ready. (Administrator Mode)", foreground="#55FF55", anchor="center")
+else:
+    lbl_status = ttk.Label(frame_bottom, text="WARNING: Not running as Administrator! Search will be incomplete.", foreground="#FF5555", anchor="center")
 lbl_status.pack(side="left", fill="x", expand=True, padx=(0, 50)) # Added right padding to perfectly center the text in the window
 
 # Context Menu Actions
 def get_selected_path():
     selected = tree.selection()
     if selected:
-        return tree.item(selected[0])['values'][1] # Location is in column index 1
+        return tree.item(selected[0])['values'][2] # Location is in column index 2
     return None
 
 def open_default(*args):
@@ -844,5 +919,16 @@ def show_context_menu(event):
 
 tree.bind("<Button-3>", show_context_menu) # Right-click
 tree.bind("<Double-1>", open_default)      # Double-click
+
+def show_admin_warning():
+    from tkinter import messagebox
+    messagebox.showwarning(
+        "Administrator Rights Required",
+        "This application requires Administrator privileges to directly scan the Master File Table (MFT) on NTFS drives.\n\n"
+        "Please restart the application as Administrator, otherwise search results will be empty or incomplete."
+    )
+
+if not is_admin():
+    root.after(100, show_admin_warning)
 
 root.mainloop()
